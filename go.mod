@@ -1,4 +1,4 @@
-module github.com/grax/bytepool
+module github.com/graxinc/bytepool
 
 go 1.23
 

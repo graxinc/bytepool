@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/grax/bytepool"
+	"github.com/graxinc/bytepool"
 )
 
 func TestBucket_basic(t *testing.T) {

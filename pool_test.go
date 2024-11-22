@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/grax/bytepool"
+	"github.com/graxinc/bytepool"
 )
 
 func TestSizedPooler_concurrentMutation(t *testing.T) {

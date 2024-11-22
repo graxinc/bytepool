@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grax/bytepool"
+	"github.com/graxinc/bytepool"
 )
 
 func TestPoolCalibrate(t *testing.T) {

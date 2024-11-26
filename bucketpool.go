@@ -27,7 +27,8 @@ type bucketPool struct {
 	pools   []*sizedPool
 }
 
-// Buckets increase with the power of two, i.e with multiplier 2: [2b, 4b, 16b, ... , 1024b]
+// Suitable for variable sized Bytes if max bounds can be chosen.
+// Uses buckets of sizes that increase with the power of two.
 // Puts over maxSize will be allocated directly.
 func NewBucket(minSize, maxSize int) SizedPooler {
 	if maxSize < minSize {

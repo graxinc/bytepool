@@ -9,15 +9,17 @@ type Bytes struct {
 }
 
 type SizedPooler interface {
-	// Bytes with zero length and minimum capacity c.
+	// Bytes with zero length and minimum capacity c. If giving back
+	// to pool, the original pointer should be Put.
 	GetGrown(c int) *Bytes
 
-	// Can be nil.
+	// Can be nil. Do not use Bytes after Put.
 	Put(*Bytes)
 }
 
 type Pooler interface {
-	// Bytes with zero length.
+	// Bytes with zero length. If giving back to pool, the
+	// original pointer should be Put.
 	Get() *Bytes
 
 	SizedPooler

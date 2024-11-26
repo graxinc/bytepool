@@ -31,7 +31,8 @@ type dynamicPool struct {
 	callSizes callSizes // buffered for use in calibrate
 }
 
-// Puts over 32MB (and sometimes under) will be dropped.
+// Continually tunes the Get allocation size and max Put size. Suitable for variable
+// sized Bytes, but at a cost.
 func NewDynamic() Pooler {
 	return new(dynamicPool)
 }

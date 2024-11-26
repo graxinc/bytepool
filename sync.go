@@ -9,6 +9,8 @@ type syncPool struct {
 	p sync.Pool
 }
 
+// Suitable for similar sized Bytes otherwise pooled
+// Bytes can trend to the largest, wasting memory.
 // Direct sync.Pool implementation.
 func NewSync() Pooler {
 	return new(syncPool)

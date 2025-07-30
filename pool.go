@@ -24,3 +24,16 @@ type Pooler interface {
 
 	SizedPooler
 }
+
+// Similar to slices.Grow, but ensures capacity for n total (not just additional appended) elements.
+func grow(s []byte, n int) []byte {
+	if n < 0 {
+		panic("bytepool: n arg to grow cannot be negative")
+	}
+	need := n - cap(s)
+	if need <= 0 {
+		return s
+	}
+	// slices.Grow says: This expression allocates only once (see test).
+	return append(s[:cap(s)], make([]byte, need)...)[:len(s)]
+}

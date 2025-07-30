@@ -1,7 +1,6 @@
 package bytepool
 
 import (
-	"slices"
 	"sync"
 )
 
@@ -26,7 +25,7 @@ func (p *syncPool) Get() *Bytes {
 
 func (p *syncPool) GetGrown(c int) *Bytes {
 	b := p.Get()
-	b.B = slices.Grow(b.B, c)
+	b.B = grow(b.B, c)
 	return b
 }
 

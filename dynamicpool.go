@@ -3,7 +3,6 @@ package bytepool
 // originally from https://github.com/valyala/bytebufferpool/blob/master/pool.go
 
 import (
-	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -49,7 +48,7 @@ func (p *dynamicPool) Get() *Bytes {
 
 func (p *dynamicPool) GetGrown(c int) *Bytes {
 	b := p.Get()
-	b.B = slices.Grow(b.B, c)
+	b.B = grow(b.B, c)
 	return b
 }
 

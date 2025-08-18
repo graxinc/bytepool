@@ -13,6 +13,10 @@ type SizedPooler interface {
 	// to pool, the original pointer should be Put.
 	GetGrown(c int) *Bytes
 
+	// Bytes with length. If giving back to pool, the
+	// original pointer should be Put.
+	GetFilled(length int) *Bytes
+
 	// Can be nil. Do not use Bytes after Put.
 	Put(*Bytes)
 }

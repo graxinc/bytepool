@@ -52,6 +52,12 @@ func (p *dynamicPool) GetGrown(c int) *Bytes {
 	return b
 }
 
+func (p *dynamicPool) GetFilled(len int) *Bytes {
+	b := p.Get()
+	b.B = grow(b.B, len)[:len]
+	return b
+}
+
 func (p *dynamicPool) Put(b *Bytes) {
 	if b == nil {
 		return

@@ -64,11 +64,17 @@ func TestSizedPooler_lenAndCap(t *testing.T) {
 
 	run := func(t *testing.T, pool bytepool.SizedPooler) {
 		rando := rand.New(rand.NewSource(5))
-		for range 1000 {
+		for range 2000 {
 			c := 1 + rando.Intn(10)
 
-			b := pool.GetGrown(c)
-			diffFatal(t, 0, len(b.B))
+			var b *bytepool.Bytes
+			if rando.Intn(2) == 0 {
+				b = pool.GetGrown(c)
+				diffFatal(t, 0, len(b.B))
+			} else {
+				b = pool.GetFilled(c)
+				diffFatal(t, c, len(b.B))
+			}
 			diffFatal(t, true, cap(b.B) >= c)
 
 			b.B = b.B[:c/2]

@@ -61,12 +61,25 @@ func (p *bucketPool) findPool(size int) *sizedPool {
 	return p.pools[idx]
 }
 
-func (p *bucketPool) GetGrown(size int) *Bytes {
-	sp := p.findPool(size)
+func (p *bucketPool) GetGrown(c int) *Bytes {
+	sp := p.findPool(c)
 	if sp == nil {
-		return makeSizedBytes(size)
+		return makeSizedBytes(c)
 	}
 	return sp.pool.Get().(*Bytes)
+}
+
+func (p *bucketPool) GetFilled(len int) *Bytes {
+	sp := p.findPool(len)
+
+	var b *Bytes
+	if sp == nil {
+		b = makeSizedBytes(len)
+	} else {
+		b = sp.pool.Get().(*Bytes)
+	}
+	b.B = b.B[:len]
+	return b
 }
 
 func (p *bucketPool) Put(b *Bytes) {
@@ -81,8 +94,8 @@ func (p *bucketPool) Put(b *Bytes) {
 	sp.pool.Put(b)
 }
 
-func makeSizedBytes(size int) *Bytes {
+func makeSizedBytes(c int) *Bytes {
 	return &Bytes{
-		B: make([]byte, 0, size),
+		B: make([]byte, 0, c),
 	}
 }

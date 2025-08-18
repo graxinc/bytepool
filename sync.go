@@ -29,6 +29,12 @@ func (p *syncPool) GetGrown(c int) *Bytes {
 	return b
 }
 
+func (p *syncPool) GetFilled(len int) *Bytes {
+	b := p.Get()
+	b.B = grow(b.B, len)[:len]
+	return b
+}
+
 func (p *syncPool) Put(b *Bytes) {
 	if b == nil {
 		return

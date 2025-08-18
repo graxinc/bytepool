@@ -22,10 +22,18 @@ func TestBucket_basic(t *testing.T) {
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 1024, cap(buf.B))
 	pool.Put(buf)
+	buf = pool.GetFilled(123)
+	diffFatal(t, 123, len(buf.B))
+	diffFatal(t, 1024, cap(buf.B))
+	pool.Put(buf)
 
 	// get boundary size
 	buf = pool.GetGrown(1024)
 	diffFatal(t, 0, len(buf.B))
+	diffFatal(t, 1024, cap(buf.B))
+	pool.Put(buf)
+	buf = pool.GetFilled(1024)
+	diffFatal(t, 1024, len(buf.B))
 	diffFatal(t, 1024, cap(buf.B))
 	pool.Put(buf)
 
@@ -34,16 +42,28 @@ func TestBucket_basic(t *testing.T) {
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 8192, cap(buf.B))
 	pool.Put(buf)
+	buf = pool.GetFilled(5000)
+	diffFatal(t, 5000, len(buf.B))
+	diffFatal(t, 8192, cap(buf.B))
+	pool.Put(buf)
 
 	// check last pool
 	buf = pool.GetGrown(16383)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 16384, cap(buf.B))
 	pool.Put(buf)
+	buf = pool.GetFilled(16383)
+	diffFatal(t, 16383, len(buf.B))
+	diffFatal(t, 16384, cap(buf.B))
+	pool.Put(buf)
 
 	// get big buffer
 	buf = pool.GetGrown(16385)
 	diffFatal(t, 0, len(buf.B))
+	diffFatal(t, 16385, cap(buf.B))
+	pool.Put(buf)
+	buf = pool.GetFilled(16385)
+	diffFatal(t, 16385, len(buf.B))
 	diffFatal(t, 16385, cap(buf.B))
 	pool.Put(buf)
 }

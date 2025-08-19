@@ -4,10 +4,58 @@ package bytepool_test
 
 import (
 	"math/rand"
+	"sync"
 	"testing"
 
 	"github.com/graxinc/bytepool"
 )
+
+func TestBucket_stats(t *testing.T) {
+	t.Run("check results", func(t *testing.T) {
+		pool := bytepool.NewBucket(2, 9)
+		for j := range 12 {
+			buf := pool.GetFilled(j)
+			if j == 11 { // putting after appending more
+				buf.B = append(buf.B, 1, 2, 3)
+			}
+			pool.Put(buf)
+		}
+		got := pool.Stats()
+		want := bytepool.BucketPoolStats{
+			Hits:         10,
+			Overs:        2,
+			LastGetOvers: []int{10, 11},
+			LastPutOvers: []int{10, 24},
+		}
+		diffFatal(t, want, got)
+	})
+	t.Run("check for race", func(t *testing.T) {
+		pool := bytepool.NewBucket(2, 9)
+
+		do := func() {
+			for j := range 12 {
+				buf := pool.GetFilled(j)
+				if j == 11 { // putting after appending more
+					buf.B = append(buf.B, 1, 2, 3)
+				}
+				pool.Put(buf)
+			}
+			pool.Stats() // check for race
+		}
+
+		for range 10 {
+			var wg sync.WaitGroup
+			for range 10 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					do()
+				}()
+			}
+			wg.Wait()
+		}
+	})
+}
 
 func TestBucket_basic(t *testing.T) {
 	maxSize := 16384
@@ -57,7 +105,7 @@ func TestBucket_basic(t *testing.T) {
 	diffFatal(t, 16384, cap(buf.B))
 	pool.Put(buf)
 
-	// get big buffer
+	// get over last pool
 	buf = pool.GetGrown(16385)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 16385, cap(buf.B))

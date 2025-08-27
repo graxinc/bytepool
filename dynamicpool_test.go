@@ -11,6 +11,8 @@ import (
 )
 
 func TestPoolCalibrate(t *testing.T) {
+	t.Parallel()
+
 	p := bytepool.NewDynamic()
 	for i := 0; i < 20*42000; i++ { // steps and calibrateCallsThreshold
 		n := 1004
@@ -22,10 +24,14 @@ func TestPoolCalibrate(t *testing.T) {
 }
 
 func TestPoolVariousSizesSerial(t *testing.T) {
+	t.Parallel()
+
 	testPoolVariousSizes(t)
 }
 
 func TestPoolVariousSizesConcurrent(t *testing.T) {
+	t.Parallel()
+
 	concurrency := 5
 	ch := make(chan struct{})
 	for i := 0; i < concurrency; i++ {

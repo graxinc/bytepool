@@ -6,6 +6,8 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/graxinc/bytepool/internal"
 )
 
 const (
@@ -48,13 +50,13 @@ func (p *dynamicPool) Get() *Bytes {
 
 func (p *dynamicPool) GetGrown(c int) *Bytes {
 	b := p.Get()
-	b.B = grow(b.B, c)
+	b.B = internal.GrowMin(b.B, c)
 	return b
 }
 
 func (p *dynamicPool) GetFilled(len int) *Bytes {
 	b := p.Get()
-	b.B = grow(b.B, len)[:len]
+	b.B = internal.GrowMin(b.B, len)[:len]
 	return b
 }
 

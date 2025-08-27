@@ -11,6 +11,8 @@ import (
 )
 
 func TestBucket_stats(t *testing.T) {
+	t.Parallel()
+
 	t.Run("check results", func(t *testing.T) {
 		pool := bytepool.NewBucket(2, 9)
 		for j := range 12 {
@@ -57,7 +59,23 @@ func TestBucket_stats(t *testing.T) {
 	})
 }
 
+func TestBucket_GetFilled_putLess(t *testing.T) {
+	t.Parallel()
+	pool := bytepool.NewBucket(4, 16)
+
+	buf := pool.GetGrown(7)
+	diffFatal(t, 0, len(buf.B))
+	diffFatal(t, 8, cap(buf.B))
+	buf.B = make([]byte, 7)
+	pool.Put(buf)
+
+	buf = pool.GetFilled(8)
+	diffFatal(t, 8, len(buf.B))
+	diffFatal(t, 8, cap(buf.B))
+}
+
 func TestBucket_basic(t *testing.T) {
+	t.Parallel()
 	maxSize := 16384
 	pool := bytepool.NewBucket(1024, maxSize)
 
@@ -117,6 +135,7 @@ func TestBucket_basic(t *testing.T) {
 }
 
 func TestBucket_oneSize(t *testing.T) {
+	t.Parallel()
 	maxSize := 1024
 	pool := bytepool.NewBucket(1024, maxSize)
 
@@ -132,6 +151,7 @@ func TestBucket_oneSize(t *testing.T) {
 }
 
 func TestBucket_twoSizeNotMultiplier(t *testing.T) {
+	t.Parallel()
 	maxSize := 2000
 	pool := bytepool.NewBucket(1024, maxSize)
 
@@ -147,6 +167,7 @@ func TestBucket_twoSizeNotMultiplier(t *testing.T) {
 }
 
 func TestBucket_weirdMaxSize(t *testing.T) {
+	t.Parallel()
 	maxSize := 15000
 	pool := bytepool.NewBucket(1024, maxSize)
 
@@ -162,6 +183,7 @@ func TestBucket_weirdMaxSize(t *testing.T) {
 }
 
 func TestBucket_fuzz(t *testing.T) {
+	t.Parallel()
 	rando := rand.New(rand.NewSource(5)) //nolint:gosec
 
 	const maxTestSize = 16384

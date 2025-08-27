@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+
+	"github.com/graxinc/bytepool/internal"
 )
 
 type sizedPool struct {
@@ -77,7 +79,9 @@ func (p *BucketPool) GetGrown(c int) *Bytes {
 		return makeSizedBytes(c)
 	}
 	p.hits.Add(1)
-	return sp.pool.Get().(*Bytes)
+	b := sp.pool.Get().(*Bytes)
+	b.B = internal.GrowMinMax(b.B, c, sp.size)
+	return b
 }
 
 func (p *BucketPool) GetFilled(len int) *Bytes {
@@ -91,6 +95,7 @@ func (p *BucketPool) GetFilled(len int) *Bytes {
 	} else {
 		p.hits.Add(1)
 		b = sp.pool.Get().(*Bytes)
+		b.B = internal.GrowMinMax(b.B, len, sp.size)
 	}
 	b.B = b.B[:len]
 	return b

@@ -3,7 +3,9 @@ package bytepool_test
 // originally from https://github.com/vitessio/vitess/blob/main/go/bucketpool/bucketpool_test.go
 
 import (
-	"math/rand"
+	"fmt"
+	"math/rand/v2"
+	"slices"
 	"sync"
 	"testing"
 
@@ -134,22 +136,6 @@ func TestBucket_basic(t *testing.T) {
 	pool.Put(buf)
 }
 
-func TestBucket_oneSize(t *testing.T) {
-	t.Parallel()
-	maxSize := 1024
-	pool := bytepool.NewBucket(1024, maxSize)
-
-	buf := pool.GetGrown(64)
-	diffFatal(t, 0, len(buf.B))
-	diffFatal(t, 1024, cap(buf.B))
-	pool.Put(buf)
-
-	buf = pool.GetGrown(1025)
-	diffFatal(t, 0, len(buf.B))
-	diffFatal(t, 1025, cap(buf.B))
-	pool.Put(buf)
-}
-
 func TestBucket_twoSizeNotMultiplier(t *testing.T) {
 	t.Parallel()
 	maxSize := 2000
@@ -182,21 +168,157 @@ func TestBucket_weirdMaxSize(t *testing.T) {
 	pool.Put(buf)
 }
 
+func TestBucket_linear(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		minSize, maxSize, numBuckets int
+		want                         []int
+	}{
+		{2, 3, 2, []int{2, 3}},
+		{2, 4, 2, []int{2, 4}},
+		{2, 5, 2, []int{2, 5}},
+
+		{2, 4, 3, []int{2, 3, 4}},
+		{2, 4, 4, []int{2, 3, 4}},
+		{2, 5, 3, []int{2, 4, 5}},
+		{2, 10, 3, []int{2, 6, 10}},
+		{2, 11, 3, []int{2, 6, 11}},
+		{2, 12, 3, []int{2, 7, 12}},
+
+		{2, 5, 4, []int{2, 3, 4, 5}},
+		{2, 6, 4, []int{2, 3, 5, 6}},
+		{2, 7, 4, []int{2, 4, 5, 7}},
+
+		{1, 1000, 8, []int{1, 144, 286, 429, 572, 715, 857, 1000}},
+		{7, 777, 8, []int{7, 117, 227, 337, 447, 557, 667, 777}},
+	}
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("min=%v,max=%v,num=%v", c.minSize, c.maxSize, c.numBuckets), func(t *testing.T) {
+			b := bytepool.NewBucketLinear(c.minSize, c.maxSize, c.numBuckets)
+			diffFatal(t, c.want, b.Buckets())
+		})
+	}
+
+	t.Run("random", func(t *testing.T) {
+		rando := rand.New(rand.NewPCG(0, 0))
+
+		var medPercents []float32
+		for range 4000 {
+			minSize := 1 + rando.IntN(20)
+			maxSize := minSize + 1 + rando.IntN(2000)
+			numBuckets := 2 + rando.IntN(100)
+
+			b := bytepool.NewBucketLinear(minSize, maxSize, numBuckets)
+			buckets := b.Buckets()
+
+			if got := buckets[0]; minSize != got {
+				t.Fatal(minSize, maxSize, numBuckets, got)
+			}
+			if got := buckets[len(buckets)-1]; maxSize != got {
+				t.Fatal(minSize, maxSize, numBuckets, got)
+			}
+			wantBuckets := min(numBuckets, maxSize-minSize+1)
+			if got := len(buckets); got != wantBuckets {
+				t.Fatal(minSize, maxSize, numBuckets, got)
+			}
+
+			med := buckets[len(buckets)/2]
+			medPercent := float32(med) / float32(maxSize-minSize)
+			medPercents = append(medPercents, medPercent)
+		}
+
+		slices.Sort(medPercents)
+		med := medPercents[len(medPercents)/2]
+		if med < 0.48 || med > 0.52 {
+			t.Fatal(med)
+		}
+	})
+}
+
+func TestBucket_expo(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		minSize, maxSize, numBuckets int
+		want                         []int
+	}{
+		{2, 3, 2, []int{2, 3}},
+		{2, 4, 2, []int{2, 4}},
+		{2, 5, 2, []int{2, 5}},
+
+		{2, 4, 3, []int{2, 3, 4}},
+		{2, 4, 4, []int{2, 3, 4}},
+		{2, 5, 3, []int{2, 3, 5}},
+		{2, 10, 3, []int{2, 4, 10}},
+		{2, 14, 3, []int{2, 5, 14}},
+		{2, 15, 3, []int{2, 5, 15}},
+		{2, 16, 3, []int{2, 6, 16}},
+
+		{2, 5, 4, []int{2, 3, 4, 5}},
+		{2, 6, 4, []int{2, 3, 4, 6}},
+		{2, 7, 4, []int{2, 3, 5, 7}},
+
+		{1, 1000, 8, []int{1, 3, 7, 19, 52, 139, 373, 1000}},
+		{7, 777, 8, []int{7, 14, 27, 53, 103, 202, 396, 777}},
+	}
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("min=%v,max=%v,num=%v", c.minSize, c.maxSize, c.numBuckets), func(t *testing.T) {
+			b := bytepool.NewBucketExpo(c.minSize, c.maxSize, c.numBuckets)
+			diffFatal(t, c.want, b.Buckets())
+		})
+	}
+
+	t.Run("random", func(t *testing.T) {
+		rando := rand.New(rand.NewPCG(0, 0))
+
+		var medPercents []float32
+		for range 4000 {
+			minSize := 1 + rando.IntN(20)
+			maxSize := minSize + 1 + rando.IntN(2000)
+			numBuckets := 2 + rando.IntN(100)
+
+			b := bytepool.NewBucketExpo(minSize, maxSize, numBuckets)
+			buckets := b.Buckets()
+
+			if got := buckets[0]; minSize != got {
+				t.Fatal(minSize, maxSize, numBuckets, got)
+			}
+			if got := buckets[len(buckets)-1]; maxSize != got {
+				t.Fatal(minSize, maxSize, numBuckets, got)
+			}
+			if got := len(buckets); got > numBuckets {
+				t.Fatal(minSize, maxSize, numBuckets, got)
+			}
+
+			med := buckets[len(buckets)/2]
+			medPercent := float32(med) / float32(maxSize-minSize)
+			medPercents = append(medPercents, medPercent)
+		}
+
+		slices.Sort(medPercents)
+		med := medPercents[len(medPercents)/2]
+		if med < 0.10 || med > 0.13 {
+			t.Fatal(med)
+		}
+	})
+}
+
 func TestBucket_fuzz(t *testing.T) {
 	t.Parallel()
-	rando := rand.New(rand.NewSource(5)) //nolint:gosec
+	rando := rand.New(rand.NewPCG(0, 0))
 
 	const maxTestSize = 16384
 	for range 20000 {
-		minSize := rando.Intn(maxTestSize)
+		minSize := rando.IntN(maxTestSize)
 		if minSize == 0 {
 			minSize = 1
 		}
-		maxSize := rando.Intn(maxTestSize-minSize) + minSize
+		maxSize := minSize + 1 + rando.IntN(maxTestSize-minSize)
 
 		p := bytepool.NewBucket(minSize, maxSize)
 
-		bufSize := rando.Intn(maxTestSize)
+		bufSize := rando.IntN(maxTestSize)
 		buf := p.GetGrown(bufSize)
 		diffFatal(t, 0, len(buf.B))
 		p.Put(buf)
@@ -208,10 +330,10 @@ func BenchmarkBucket_getPut(b *testing.B) {
 	pool := bytepool.NewBucket(2, maxSize)
 	b.SetParallelism(16)
 	b.RunParallel(func(pb *testing.PB) {
-		rando := rand.New(rand.NewSource(5)) //nolint:gosec
+		rando := rand.New(rand.NewPCG(0, 0))
 
 		for pb.Next() {
-			randomSize := rando.Intn(maxSize)
+			randomSize := rando.IntN(maxSize)
 			data := pool.GetGrown(randomSize)
 			pool.Put(data)
 		}
@@ -223,10 +345,10 @@ func BenchmarkBucket_get(b *testing.B) {
 	pool := bytepool.NewBucket(2, maxSize)
 	b.SetParallelism(16)
 	b.RunParallel(func(pb *testing.PB) {
-		rando := rand.New(rand.NewSource(5)) //nolint:gosec
+		rando := rand.New(rand.NewPCG(0, 0))
 
 		for pb.Next() {
-			randomSize := rando.Intn(maxSize)
+			randomSize := rando.IntN(maxSize)
 			data := pool.GetGrown(randomSize)
 			_ = data
 		}

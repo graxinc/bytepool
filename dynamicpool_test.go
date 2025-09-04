@@ -3,7 +3,7 @@ package bytepool_test
 // originally from https://github.com/valyala/bytebufferpool/blob/master/pool_test.go
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -17,7 +17,7 @@ func TestPoolCalibrate(t *testing.T) {
 	for i := 0; i < 20*42000; i++ { // steps and calibrateCallsThreshold
 		n := 1004
 		if i%15 == 0 {
-			n = rand.Intn(15234) //nolint:gosec
+			n = rand.IntN(15234)
 		}
 		testGetPut(t, p, n)
 	}

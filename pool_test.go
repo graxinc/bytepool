@@ -2,7 +2,7 @@ package bytepool_test
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"testing"
 	"time"
@@ -16,15 +16,15 @@ func TestSizedPooler_concurrentMutation(t *testing.T) {
 
 	run := func(t *testing.T, pool bytepool.SizedPooler) {
 		runGo := func() {
-			rando := rand.New(rand.NewSource(5))
+			rando := rand.New(rand.NewPCG(0, 0))
 			for range 1000 {
-				c1 := 1 + rando.Intn(10)
-				c2 := rando.Intn(c1)
+				c1 := 1 + rando.IntN(10)
+				c2 := rando.IntN(c1)
 
 				b := pool.GetGrown(c1)
 
 				b.B = b.B[:c1]
-				b.B[c2] = byte(rando.Intn(255))
+				b.B[c2] = byte(rando.IntN(255))
 
 				s1 := string(b.B)
 				time.Sleep(time.Millisecond) // time for concurrent mutation
@@ -63,12 +63,12 @@ func TestSizedPooler_lenAndCap(t *testing.T) {
 	t.Parallel()
 
 	run := func(t *testing.T, pool bytepool.SizedPooler) {
-		rando := rand.New(rand.NewSource(5))
+		rando := rand.New(rand.NewPCG(0, 0))
 		for range 4000 {
-			c := 1 + rando.Intn(10)
+			c := 1 + rando.IntN(10)
 
 			var b *bytepool.Bytes
-			if rando.Intn(2) == 0 {
+			if rando.IntN(2) == 0 {
 				b = pool.GetGrown(c)
 				diffFatal(t, 0, len(b.B))
 			} else {
@@ -77,8 +77,8 @@ func TestSizedPooler_lenAndCap(t *testing.T) {
 			}
 			diffFatal(t, true, cap(b.B) >= c)
 
-			if rando.Intn(5) == 0 {
-				b.B = make([]byte, rando.Intn(10))
+			if rando.IntN(5) == 0 {
+				b.B = make([]byte, rando.IntN(10))
 			} else {
 				b.B = b.B[:c/2]
 			}
@@ -117,9 +117,9 @@ func TestSizedPooler_nilPut(t *testing.T) {
 func BenchmarkSizedPooler(b *testing.B) {
 	run := func(b *testing.B, pool bytepool.SizedPooler, doPut bool) {
 		b.RunParallel(func(p *testing.PB) {
-			rando := rand.New(rand.NewSource(5)) //nolint:gosec
+			rando := rand.New(rand.NewPCG(0, 0))
 			for p.Next() {
-				c := 2 + rando.Intn(2)
+				c := 2 + rando.IntN(2)
 				b := pool.GetGrown(c)
 				b.B = b.B[:c]
 				b.B[1] = 5

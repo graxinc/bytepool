@@ -327,7 +327,8 @@ func TestBucket_fuzz(t *testing.T) {
 
 func BenchmarkBucket_getPut(b *testing.B) {
 	const maxSize = 16384
-	pool := bytepool.NewBucket(2, maxSize)
+	pool := bytepool.NewBucketExpo(2, maxSize, 30)
+	b.Log("buckets", len(pool.Buckets()))
 	b.SetParallelism(16)
 	b.RunParallel(func(pb *testing.PB) {
 		rando := rand.New(rand.NewPCG(0, 0))
@@ -342,7 +343,8 @@ func BenchmarkBucket_getPut(b *testing.B) {
 
 func BenchmarkBucket_get(b *testing.B) {
 	const maxSize = 16384
-	pool := bytepool.NewBucket(2, maxSize)
+	pool := bytepool.NewBucketExpo(2, maxSize, 30)
+	b.Log("buckets", len(pool.Buckets()))
 	b.SetParallelism(16)
 	b.RunParallel(func(pb *testing.PB) {
 		rando := rand.New(rand.NewPCG(0, 0))

@@ -4,7 +4,6 @@ package bytepool
 
 import (
 	"math"
-	"math/bits"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -27,9 +26,7 @@ func newSizedPool(size int) *sizedPool {
 }
 
 type BucketPool struct {
-	minSize int
-	maxSize int
-	pools   []*sizedPool
+	pools []*sizedPool
 
 	hits         atomic.Uint64
 	overs        atomic.Uint64
@@ -136,23 +133,16 @@ func NewBucketFull(sizes []int) *BucketPool {
 	for _, s := range sizes {
 		pools = append(pools, newSizedPool(s))
 	}
-	return &BucketPool{
-		minSize: slices.Min(sizes),
-		maxSize: slices.Max(sizes),
-		pools:   pools,
-	}
+	return &BucketPool{pools: pools}
 }
 
 func (p *BucketPool) findPool(size int) *sizedPool {
-	if size > p.maxSize {
-		return nil
+	for _, sp := range p.pools {
+		if size <= sp.size {
+			return sp
+		}
 	}
-	div, rem := bits.Div64(0, uint64(size), uint64(p.minSize))
-	idx := bits.Len64(div)
-	if rem == 0 && div != 0 && (div&(div-1)) == 0 {
-		idx = idx - 1
-	}
-	return p.pools[idx]
+	return nil
 }
 
 func (p *BucketPool) GetGrown(c int) *Bytes {

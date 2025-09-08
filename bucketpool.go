@@ -135,6 +135,42 @@ func (p *BucketPool) GetFilled(len int) *Bytes {
 	return b
 }
 
+type BucketPoolerOptions struct {
+	ChooseInc   int     // defaults to 1k puts.
+	Decay       float64 // defaults to 0.5 (half previous put count).
+	MaxPoolPuts int     // defaults to 100 times ChooseInc.
+}
+
+func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
+	if o.ChooseInc <= 0 {
+		o.ChooseInc = 1000
+	}
+	if o.Decay <= 0 {
+		o.Decay = 0.5
+	}
+	if o.MaxPoolPuts <= 0 {
+		o.MaxPoolPuts = o.ChooseInc * 100
+	}
+
+	// since pools and bins are not separate and the ranges in sizes can be non-linear, it might
+	// push the default pool up or down. However separating bins out bins to linear can lead to
+	// a too big smallest bin for a large exponential size set of pools.
+
+	var bins []*histoBin
+	for range p.pools {
+		bins = append(bins, &histoBin{})
+	}
+	pooler := &BucketPooler{
+		pool:        p,
+		bins:        bins,
+		chooseInc:   int64(o.ChooseInc),
+		decay:       o.Decay,
+		maxPoolPuts: int64(o.MaxPoolPuts),
+	}
+	pooler.puts.Store(-9)
+	return pooler
+}
+
 func (p *BucketPool) Put(b *Bytes) {
 	if b == nil {
 		return
@@ -155,7 +191,7 @@ type BucketStats struct {
 }
 
 type BucketPoolStats struct {
-	Buckets  []BucketStats
+	Buckets  []BucketStats // only those with positive counters.
 	MinSize  int
 	MaxSize  int
 	Sizes    int
@@ -224,6 +260,129 @@ func (p *BucketPool) over(over int, isPut bool) {
 		p.putOvers = add(p.putOvers, over)
 	} else {
 		p.getOvers = add(p.getOvers, over)
+	}
+}
+
+type histoBin struct {
+	puts   atomic.Int64
+	hits   atomic.Uint64
+	misses atomic.Uint64
+}
+
+type BucketPooler struct {
+	// immutable
+	pool        *BucketPool
+	chooseInc   int64
+	maxPoolPuts int64
+	decay       float64
+
+	bins   []*histoBin // slice immutable, same length as sizes in pool.
+	defIdx atomic.Int64
+	puts   atomic.Int64 // starts at -9
+}
+
+func (g *BucketPooler) GetGrown(c int) *Bytes {
+	return g.pool.GetGrown(c)
+}
+
+func (g *BucketPooler) GetFilled(length int) *Bytes {
+	return g.pool.GetFilled(length)
+}
+
+func (g *BucketPooler) Get() *Bytes {
+	idx := g.defIdx.Load()
+
+	b, hit := g.pool.pools[idx].get()
+	if hit {
+		g.bins[idx].hits.Add(1)
+	} else {
+		g.bins[idx].misses.Add(1)
+	}
+	return b
+}
+
+func (g *BucketPooler) Put(b *Bytes) {
+	defer g.pool.Put(b) // after len use below
+
+	idx, _ := g.pool.findPool(len(b.B))
+	if idx < 0 {
+		return
+	}
+
+	g.bins[idx].puts.Add(1)
+
+	inc := g.puts.Add(1)
+
+	if inc > 0 {
+		if inc != g.chooseInc {
+			return
+		}
+		defer g.puts.Store(0)
+	} // else ramp from negative for first times.
+
+	g.chooseDefPool()
+	g.reducePuts()
+}
+
+type BinStats struct {
+	Size   int
+	Puts   int64
+	Hits   uint64
+	Misses uint64
+}
+
+type BucketPoolerStats struct {
+	Bins        []BinStats // only those with positive counters
+	DefaultSize int
+	Hits        uint64
+	Misses      uint64
+}
+
+func (g *BucketPooler) Stats() BucketPoolerStats {
+	ps := BucketPoolerStats{
+		DefaultSize: g.pool.pools[g.defIdx.Load()].size,
+	}
+	for i, bin := range g.bins {
+		s := BinStats{
+			Size:   g.pool.pools[i].size,
+			Puts:   bin.puts.Load(),
+			Hits:   bin.hits.Load(),
+			Misses: bin.misses.Load(),
+		}
+		if s.Puts <= 0 && s.Hits <= 0 && s.Misses <= 0 {
+			continue
+		}
+		ps.Hits += s.Hits
+		ps.Misses += s.Misses
+		ps.Bins = append(ps.Bins, s)
+	}
+	return ps
+}
+
+func (g *BucketPooler) chooseDefPool() {
+	maxPuts := int64(-1)
+	var bestPool int
+
+	for i, bin := range g.bins {
+		v := bin.puts.Load()
+		if v > maxPuts {
+			maxPuts = v
+			bestPool = i
+		}
+	}
+	g.defIdx.Store(int64(bestPool))
+}
+
+func (g *BucketPooler) reducePuts() {
+	for _, bin := range g.bins {
+		for {
+			v := bin.puts.Load()
+			decayed := math.RoundToEven(float64(v) * g.decay)
+			v2 := min(int64(decayed), g.maxPoolPuts)
+			if bin.puts.CompareAndSwap(v, v2) {
+				break
+			}
+		}
 	}
 }
 

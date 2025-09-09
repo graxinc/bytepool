@@ -1,14 +1,18 @@
 package bytepool_test
 
 import (
+	"bytes"
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"slices"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/graxinc/bytepool"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/graxinc/bytepool"
 )
 
 func TestBucket_stats(t *testing.T) {
@@ -75,6 +79,196 @@ func TestBucket_stats(t *testing.T) {
 			wg.Wait()
 		}
 	})
+}
+
+func TestBucket_getChoice(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		fills     []int
+		chooseInc int
+		want      bytepool.BucketPoolerStats
+	}{
+		{
+			fills:     []int{8, 7, 3, 4, 6},
+			chooseInc: 2,
+			want: bytepool.BucketPoolerStats{
+				Bins: []bytepool.BinStats{
+					{Size: 2, Misses: 1},
+					{Size: 4, Hits: 1, Misses: 1},
+					{Size: 8, Hits: 2},
+				},
+				DefaultSize: 8,
+				Hits:        3,
+				Misses:      2,
+			},
+		},
+		{
+			fills:     []int{1, 2, 3, 3, 4, 5, 6, 7, 8, 3, 7, 6, 5, 4, 3, 2, 1},
+			chooseInc: 3,
+			want: bytepool.BucketPoolerStats{
+				Bins: []bytepool.BinStats{
+					{Size: 2, Puts: 2, Hits: 2, Misses: 1},
+					{Size: 4, Puts: 1, Hits: 3, Misses: 2},
+					{Size: 8, Puts: 1, Hits: 9},
+				},
+				DefaultSize: 4,
+				Hits:        14,
+				Misses:      3,
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run("", func(t *testing.T) {
+			sizes := bytepool.Pow2Sizes(2, 8)
+			var lastDiff string
+			for range 100 { // can have a buf dropped sometimes
+				pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: c.chooseInc})
+
+				for _, f := range c.fills {
+					b := pooler.Get()
+					fillBytes(b, f)
+					pooler.Put(b)
+				}
+
+				lastDiff = cmp.Diff(c.want, pooler.Stats())
+				if lastDiff == "" {
+					return
+				}
+			}
+			t.Fatal(lastDiff)
+		})
+	}
+}
+
+func TestBucket_getChoice_shared(t *testing.T) {
+	t.Parallel()
+
+	sizes := bytepool.ExpoSizes(4, 16, 3)
+	t.Log("sizes", sizes)
+
+	var lastDiff string
+	for range 100 { // can have a buf dropped sometimes
+		pool := bytepool.NewBucketFull(sizes)
+		pooler1 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1})
+		pooler2 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1})
+
+		do := func(p *bytepool.BucketPooler, fills ...int) {
+			for _, f := range fills {
+				b := p.Get()
+				fillBytes(b, f)
+				p.Put(b)
+			}
+		}
+		do(pooler1, 5, 6)
+		do(pooler2, 11, 12)
+
+		got := []bytepool.BucketPoolerStats{pooler1.Stats(), pooler2.Stats()}
+		want := []bytepool.BucketPoolerStats{
+			{
+				Bins: []bytepool.BinStats{
+					{Size: 4, Misses: 1},
+					{Size: 8, Hits: 1},
+				},
+				DefaultSize: 8,
+				Hits:        1,
+				Misses:      1,
+			},
+			{
+				Bins: []bytepool.BinStats{
+					{Size: 4, Misses: 1},
+					{Size: 16, Hits: 1},
+				},
+				DefaultSize: 16,
+				Hits:        1,
+				Misses:      1,
+			},
+		}
+
+		lastDiff = cmp.Diff(want, got)
+		if lastDiff == "" {
+			return
+		}
+	}
+	t.Fatal(lastDiff)
+}
+
+func TestBucket_getChoice_concurrent(t *testing.T) {
+	t.Parallel()
+
+	// center 0.5 for n/2.
+	normInt := func(rando *rand.Rand, n int, center float64) int {
+		f := rando.NormFloat64()
+
+		// normfloat * stddev + desiredMean
+		vf := f*(float64(n)/7) + float64(n)*center
+		v := int(math.RoundToEven(vf))
+		v = min(n, v)
+		v = max(0, v)
+		return v
+	}
+
+	const maxSize = 1000
+	sizes := bytepool.ExpoSizes(8, maxSize, 20)
+
+	run := func(t *testing.T, center float64, wantDefMin, wantDefMax int) {
+		t.Parallel()
+
+		pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: 200})
+
+		runGo := func(id byte, rando *rand.Rand) {
+			n := normInt(rando, maxSize, center)
+
+			b := pooler.Get()
+
+			if v := len(b.B); v != 0 {
+				t.Error(v)
+				return
+			}
+			if v := cap(b.B); v > maxSize {
+				t.Error(v)
+				return
+			}
+
+			randBytes := bytes.Repeat([]byte{id}, n)
+
+			b.B = append(b.B, randBytes...)
+
+			time.Sleep(time.Microsecond)
+
+			if !bytes.Equal(b.B, randBytes) {
+				t.Error("not equal")
+				return
+			}
+
+			pooler.Put(b)
+		}
+
+		var wg sync.WaitGroup
+		for i := range byte(5) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				rando := rand.New(rand.NewPCG(uint64(i), 0))
+
+				for range 10_000 {
+					runGo(i, rando)
+				}
+			}()
+		}
+		wg.Wait()
+
+		s := pooler.Stats()
+		t.Logf("stats:\n%+v", s)
+
+		if s.DefaultSize < wantDefMin || s.DefaultSize > wantDefMax {
+			t.Fatal(s.DefaultSize)
+		}
+	}
+	t.Run("center=0.3", func(t *testing.T) { run(t, 0.3, 280, 470) })
+	t.Run("center=0.5", func(t *testing.T) { run(t, 0.5, 450, 650) })
+	t.Run("center=0.7", func(t *testing.T) { run(t, 0.7, 650, 780) })
 }
 
 func TestBucket_GetFilled_putLess(t *testing.T) {
@@ -371,4 +565,8 @@ func BenchmarkBucket_get(b *testing.B) {
 			_ = data
 		}
 	})
+}
+
+func fillBytes(b *bytepool.Bytes, n int) {
+	b.B = append(b.B, bytes.Repeat([]byte{5}, n)...)
 }

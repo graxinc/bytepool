@@ -166,7 +166,7 @@ func TestBucket_weirdMaxSize(t *testing.T) {
 	pool.Put(buf)
 }
 
-func TestBucket_linear(t *testing.T) {
+func TestBucket_LinearSizes(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -193,8 +193,8 @@ func TestBucket_linear(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(fmt.Sprintf("min=%v,max=%v,num=%v", c.minSize, c.maxSize, c.numBuckets), func(t *testing.T) {
-			b := bytepool.NewBucketLinear(c.minSize, c.maxSize, c.numBuckets)
-			diffFatal(t, c.want, b.Buckets())
+			sizes := bytepool.LinearSizes(c.minSize, c.maxSize, c.numBuckets)
+			diffFatal(t, c.want, sizes)
 		})
 	}
 
@@ -207,21 +207,20 @@ func TestBucket_linear(t *testing.T) {
 			maxSize := minSize + 1 + rando.IntN(2000)
 			numBuckets := 2 + rando.IntN(100)
 
-			b := bytepool.NewBucketLinear(minSize, maxSize, numBuckets)
-			buckets := b.Buckets()
+			sizes := bytepool.LinearSizes(minSize, maxSize, numBuckets)
 
-			if got := buckets[0]; minSize != got {
+			if got := sizes[0]; minSize != got {
 				t.Fatal(minSize, maxSize, numBuckets, got)
 			}
-			if got := buckets[len(buckets)-1]; maxSize != got {
+			if got := sizes[len(sizes)-1]; maxSize != got {
 				t.Fatal(minSize, maxSize, numBuckets, got)
 			}
 			wantBuckets := min(numBuckets, maxSize-minSize+1)
-			if got := len(buckets); got != wantBuckets {
+			if got := len(sizes); got != wantBuckets {
 				t.Fatal(minSize, maxSize, numBuckets, got)
 			}
 
-			med := buckets[len(buckets)/2]
+			med := sizes[len(sizes)/2]
 			medPercent := float32(med) / float32(maxSize-minSize)
 			medPercents = append(medPercents, medPercent)
 		}
@@ -234,7 +233,7 @@ func TestBucket_linear(t *testing.T) {
 	})
 }
 
-func TestBucket_expo(t *testing.T) {
+func TestBucket_ExpoSizes(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -262,8 +261,8 @@ func TestBucket_expo(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(fmt.Sprintf("min=%v,max=%v,num=%v", c.minSize, c.maxSize, c.numBuckets), func(t *testing.T) {
-			b := bytepool.NewBucketExpo(c.minSize, c.maxSize, c.numBuckets)
-			diffFatal(t, c.want, b.Buckets())
+			sizes := bytepool.ExpoSizes(c.minSize, c.maxSize, c.numBuckets)
+			diffFatal(t, c.want, sizes)
 		})
 	}
 
@@ -276,20 +275,19 @@ func TestBucket_expo(t *testing.T) {
 			maxSize := minSize + 1 + rando.IntN(2000)
 			numBuckets := 2 + rando.IntN(100)
 
-			b := bytepool.NewBucketExpo(minSize, maxSize, numBuckets)
-			buckets := b.Buckets()
+			sizes := bytepool.ExpoSizes(minSize, maxSize, numBuckets)
 
-			if got := buckets[0]; minSize != got {
+			if got := sizes[0]; minSize != got {
 				t.Fatal(minSize, maxSize, numBuckets, got)
 			}
-			if got := buckets[len(buckets)-1]; maxSize != got {
+			if got := sizes[len(sizes)-1]; maxSize != got {
 				t.Fatal(minSize, maxSize, numBuckets, got)
 			}
-			if got := len(buckets); got > numBuckets {
+			if got := len(sizes); got > numBuckets {
 				t.Fatal(minSize, maxSize, numBuckets, got)
 			}
 
-			med := buckets[len(buckets)/2]
+			med := sizes[len(sizes)/2]
 			medPercent := float32(med) / float32(maxSize-minSize)
 			medPercents = append(medPercents, medPercent)
 		}
@@ -325,8 +323,9 @@ func TestBucket_fuzz(t *testing.T) {
 
 func BenchmarkBucket_getPut(b *testing.B) {
 	const maxSize = 16384
-	pool := bytepool.NewBucketExpo(2, maxSize, 30)
-	b.Log("buckets", len(pool.Buckets()))
+	sizes := bytepool.ExpoSizes(2, maxSize, 30)
+	pool := bytepool.NewBucketFull(sizes)
+	b.Log("sizes", sizes)
 	b.SetParallelism(16)
 	b.RunParallel(func(pb *testing.PB) {
 		rando := rand.New(rand.NewPCG(0, 0))
@@ -341,8 +340,9 @@ func BenchmarkBucket_getPut(b *testing.B) {
 
 func BenchmarkBucket_get(b *testing.B) {
 	const maxSize = 16384
-	pool := bytepool.NewBucketExpo(2, maxSize, 30)
-	b.Log("buckets", len(pool.Buckets()))
+	sizes := bytepool.ExpoSizes(2, maxSize, 30)
+	pool := bytepool.NewBucketFull(sizes)
+	b.Log("sizes", len(sizes))
 	b.SetParallelism(16)
 	b.RunParallel(func(pb *testing.PB) {
 		rando := rand.New(rand.NewPCG(0, 0))

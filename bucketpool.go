@@ -9,6 +9,69 @@ import (
 	"github.com/graxinc/bytepool/internal"
 )
 
+// sizes that increase with the power of two.
+// minSize must be >= 1 and maxSize > minSize.
+func Pow2Sizes(minSize, maxSize int) []int {
+	if minSize < 1 {
+		panic("minSize < 1")
+	}
+	if maxSize <= minSize {
+		panic("maxSize <= minSize")
+	}
+	var sizes []int
+	const multiplier = 2
+	for s := minSize; s < maxSize; s *= multiplier {
+		sizes = append(sizes, s)
+	}
+	sizes = append(sizes, maxSize)
+	return sizes
+}
+
+// Distributes sizes linearly over numBuckets.
+// minSize must be >= 0, maxSize > minSize, and numBuckets >= 2.
+func LinearSizes(minSize, maxSize, numBuckets int) []int {
+	if minSize < 0 {
+		panic("minSize < 0")
+	}
+	if maxSize <= minSize {
+		panic("maxSize <= minSize")
+	}
+	if numBuckets < 2 {
+		panic("numBuckets < 2")
+	}
+	var sizes []int
+	inc := float64(maxSize-minSize) / float64(numBuckets-1)
+	for i := range numBuckets {
+		v := float64(minSize) + float64(i)*inc
+		sizes = append(sizes, int(math.RoundToEven(v)))
+	}
+	sizes = slices.Compact(sizes)
+	return sizes
+}
+
+// Distributes sizes exponentially over numBuckets.
+// minSize must be >= 1, maxSize > minSize, and numBuckets >= 2.
+func ExpoSizes(minSize, maxSize, numBuckets int) []int {
+	if minSize < 1 {
+		panic("minSize < 1")
+	}
+	if maxSize <= minSize {
+		panic("maxSize <= minSize")
+	}
+	if numBuckets < 2 {
+		panic("numBuckets < 2")
+	}
+	var sizes []int
+	// size at i = min * (max/min)^(1/(N-1))
+	r := math.Pow(float64(maxSize)/float64(minSize), 1/float64(numBuckets-1))
+	for i := range numBuckets {
+		v := float64(minSize) * math.Pow(r, float64(i))
+		sizes = append(sizes, int(math.RoundToEven(v)))
+	}
+	sizes = slices.Compact(sizes)
+	return sizes
+}
+
 type BucketPool struct {
 	pools []*sizedPool
 
@@ -19,86 +82,14 @@ type BucketPool struct {
 	lastPutOvers []int
 }
 
-// Suitable for variable sized Bytes if max bounds can be chosen.
-// Uses buckets of sizes that increase with the power of two.
-// Puts over maxSize will be allocated directly.
-// minSize must be >= 1 and maxSize > minSize.
+// Deprecated.
 func NewBucket(minSize, maxSize int) *BucketPool {
-	if minSize < 1 {
-		panic("minSize < 1")
-	}
-	if maxSize <= minSize {
-		panic("maxSize <= minSize")
-	}
-
-	var sizes []int
-
-	const multiplier = 2
-	for s := minSize; s < maxSize; s *= multiplier {
-		sizes = append(sizes, s)
-	}
-	sizes = append(sizes, maxSize)
-
-	return NewBucketFull(sizes)
-}
-
-// Suitable for variable sized Bytes if max bounds can be chosen.
-// Distributes bucket sizes linearly over numBuckets.
-// Puts over max size will be allocated directly.
-// minSize must be >= 1, maxSize > minSize, and numBuckets >= 2.
-func NewBucketLinear(minSize, maxSize, numBuckets int) *BucketPool {
-	if minSize < 1 {
-		panic("minSize < 1")
-	}
-	if maxSize <= minSize {
-		panic("maxSize <= minSize")
-	}
-	if numBuckets < 2 {
-		panic("numBuckets < 2")
-	}
-
-	var sizes []int
-
-	inc := float64(maxSize-minSize) / float64(numBuckets-1)
-
-	for i := range numBuckets {
-		v := float64(minSize) + float64(i)*inc
-		sizes = append(sizes, int(math.RoundToEven(v)))
-	}
-
-	return NewBucketFull(sizes)
-}
-
-// Suitable for variable sized Bytes if max bounds can be chosen.
-// Distributes bucket sizes exponentially over numBuckets.
-// Puts over max size will be allocated directly.
-// minSize must be >= 1, maxSize > minSize, and numBuckets >= 2.
-func NewBucketExpo(minSize, maxSize, numBuckets int) *BucketPool {
-	if minSize < 1 {
-		panic("minSize < 1")
-	}
-	if maxSize <= minSize {
-		panic("maxSize <= minSize")
-	}
-	if numBuckets < 2 {
-		panic("numBuckets < 2")
-	}
-
-	var sizes []int
-
-	// size at i = min * (max/min)^(1/(N-1))
-	r := math.Pow(float64(maxSize)/float64(minSize), 1/float64(numBuckets-1))
-
-	for i := range numBuckets {
-		v := float64(minSize) * math.Pow(r, float64(i))
-		sizes = append(sizes, int(math.RoundToEven(v)))
-	}
-	return NewBucketFull(sizes)
+	return NewBucketFull(Pow2Sizes(minSize, maxSize))
 }
 
 // Suitable for variable sized Bytes if max bounds can be chosen.
 // Puts over max size will be allocated directly.
-// sizes must be >= 1. Repeats will be removed.
+// sizes must not be empty and each must be >= 1. Repeats will be removed.
 func NewBucketFull(sizes []int) *BucketPool {
 	if len(sizes) == 0 {
 		panic("empty sizes")
@@ -181,14 +172,6 @@ func (p *BucketPool) Stats() BucketPoolStats {
 		LastGetOvers: slices.Clone(p.lastGetOvers),
 		LastPutOvers: slices.Clone(p.lastPutOvers),
 	}
-}
-
-func (p *BucketPool) Buckets() []int {
-	var v []int
-	for _, p := range p.pools {
-		v = append(v, p.size)
-	}
-	return v
 }
 
 func (p *BucketPool) findPool(size int) *sizedPool {

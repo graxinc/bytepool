@@ -58,7 +58,8 @@ func TestSizedPooler_concurrentMutation(t *testing.T) {
 		run(t, bytepool.NewBucket(1, 20))
 	})
 	t.Run("bucket_expo", func(t *testing.T) {
-		run(t, bytepool.NewBucketExpo(1, 20, 20))
+		sizes := bytepool.ExpoSizes(1, 20, 20)
+		run(t, bytepool.NewBucketFull(sizes))
 	})
 }
 
@@ -99,7 +100,8 @@ func TestSizedPooler_lenAndCap(t *testing.T) {
 		run(t, bytepool.NewBucket(1, 20))
 	})
 	t.Run("bucket_expo", func(t *testing.T) {
-		run(t, bytepool.NewBucketExpo(1, 20, 20))
+		sizes := bytepool.ExpoSizes(1, 20, 20)
+		run(t, bytepool.NewBucketFull(sizes))
 	})
 }
 

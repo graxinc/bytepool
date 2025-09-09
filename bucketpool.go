@@ -1,7 +1,5 @@
 package bytepool
 
-// originally from https://github.com/vitessio/vitess/blob/main/go/bucketpool/bucketpool.go
-
 import (
 	"math"
 	"slices"
@@ -10,20 +8,6 @@ import (
 
 	"github.com/graxinc/bytepool/internal"
 )
-
-type sizedPool struct {
-	size int
-	pool sync.Pool
-}
-
-func newSizedPool(size int) *sizedPool {
-	return &sizedPool{
-		size: size,
-		pool: sync.Pool{
-			New: func() any { return makeSizedBytes(size) },
-		},
-	}
-}
 
 type BucketPool struct {
 	pools []*sizedPool
@@ -136,15 +120,6 @@ func NewBucketFull(sizes []int) *BucketPool {
 	return &BucketPool{pools: pools}
 }
 
-func (p *BucketPool) findPool(size int) *sizedPool {
-	for _, sp := range p.pools {
-		if size <= sp.size {
-			return sp
-		}
-	}
-	return nil
-}
-
 func (p *BucketPool) GetGrown(c int) *Bytes {
 	sp := p.findPool(c)
 	if sp == nil {
@@ -216,6 +191,15 @@ func (p *BucketPool) Buckets() []int {
 	return v
 }
 
+func (p *BucketPool) findPool(size int) *sizedPool {
+	for _, sp := range p.pools {
+		if size <= sp.size {
+			return sp
+		}
+	}
+	return nil
+}
+
 func (p *BucketPool) over(over int, isPut bool) {
 	if p.statLock.Swap(true) { //  already locked, skip to reduce contention
 		return
@@ -233,6 +217,20 @@ func (p *BucketPool) over(over int, isPut bool) {
 		p.lastPutOvers = add(p.lastPutOvers, over)
 	} else {
 		p.lastGetOvers = add(p.lastGetOvers, over)
+	}
+}
+
+type sizedPool struct {
+	size int
+	pool sync.Pool
+}
+
+func newSizedPool(size int) *sizedPool {
+	return &sizedPool{
+		size: size,
+		pool: sync.Pool{
+			New: func() any { return makeSizedBytes(size) },
+		},
 	}
 }
 

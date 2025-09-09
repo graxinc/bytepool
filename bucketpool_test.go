@@ -1,7 +1,5 @@
 package bytepool_test
 
-// originally from https://github.com/vitessio/vitess/blob/main/go/bucketpool/bucketpool_test.go
-
 import (
 	"fmt"
 	"math/rand/v2"

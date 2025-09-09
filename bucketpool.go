@@ -73,13 +73,12 @@ func ExpoSizes(minSize, maxSize, numBuckets int) []int {
 }
 
 type BucketPool struct {
-	pools []*sizedPool
-
-	hits         atomic.Uint64
-	overs        atomic.Uint64
-	statLock     atomic.Bool
-	lastGetOvers []int
-	lastPutOvers []int
+	pools     []*sizedPool
+	hits      atomic.Uint64
+	overs     atomic.Uint64
+	oversLock atomic.Bool
+	getOvers  []int
+	putOvers  []int
 }
 
 // Deprecated.
@@ -155,22 +154,22 @@ func (p *BucketPool) Put(b *Bytes) {
 }
 
 type BucketPoolStats struct {
-	Hits         uint64
-	Overs        uint64
-	LastGetOvers []int
-	LastPutOvers []int
+	Hits     uint64
+	Overs    uint64
+	GetOvers []int
+	PutOvers []int
 }
 
 func (p *BucketPool) Stats() BucketPoolStats {
-	for p.statLock.Swap(true) { // busy loop until not locked
+	for p.oversLock.Swap(true) { // busy loop until not locked
 	}
-	defer p.statLock.Store(false)
+	defer p.oversLock.Store(false)
 
 	return BucketPoolStats{
-		Hits:         p.hits.Load(),
-		Overs:        p.overs.Load(),
-		LastGetOvers: slices.Clone(p.lastGetOvers),
-		LastPutOvers: slices.Clone(p.lastPutOvers),
+		Hits:     p.hits.Load(),
+		Overs:    p.overs.Load(),
+		GetOvers: slices.Clone(p.getOvers),
+		PutOvers: slices.Clone(p.putOvers),
 	}
 }
 
@@ -184,10 +183,10 @@ func (p *BucketPool) findPool(size int) *sizedPool {
 }
 
 func (p *BucketPool) over(over int, isPut bool) {
-	if p.statLock.Swap(true) { //  already locked, skip to reduce contention
+	if p.oversLock.Swap(true) { //  already locked, skip to reduce contention
 		return
 	}
-	defer p.statLock.Store(false)
+	defer p.oversLock.Store(false)
 
 	add := func(s []int, v int) []int {
 		if len(s) > 10 {
@@ -197,9 +196,9 @@ func (p *BucketPool) over(over int, isPut bool) {
 		return s
 	}
 	if isPut {
-		p.lastPutOvers = add(p.lastPutOvers, over)
+		p.putOvers = add(p.putOvers, over)
 	} else {
-		p.lastGetOvers = add(p.lastGetOvers, over)
+		p.getOvers = add(p.getOvers, over)
 	}
 }
 

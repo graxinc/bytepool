@@ -24,10 +24,10 @@ func TestBucket_stats(t *testing.T) {
 		}
 		got := pool.Stats()
 		want := bytepool.BucketPoolStats{
-			Hits:         10,
-			Overs:        2,
-			LastGetOvers: []int{10, 11},
-			LastPutOvers: []int{10, 24},
+			Hits:     10,
+			Overs:    2,
+			GetOvers: []int{10, 11},
+			PutOvers: []int{10, 24},
 		}
 		diffFatal(t, want, got)
 	})

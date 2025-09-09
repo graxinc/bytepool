@@ -74,7 +74,6 @@ func ExpoSizes(minSize, maxSize, numBuckets int) []int {
 
 type BucketPool struct {
 	pools     []*sizedPool
-	hits      atomic.Uint64
 	overs     atomic.Uint64
 	oversLock atomic.Bool
 	getOvers  []int
@@ -111,29 +110,25 @@ func NewBucketFull(sizes []int) *BucketPool {
 }
 
 func (p *BucketPool) GetGrown(c int) *Bytes {
-	sp := p.findPool(c)
+	_, sp := p.findPool(c)
 	if sp == nil {
-		p.overs.Add(1)
 		p.over(c, false)
 		return makeSizedBytes(c)
 	}
-	p.hits.Add(1)
-	b := sp.pool.Get().(*Bytes)
+	b, _ := sp.get()
 	b.B = internal.GrowMinMax(b.B, c, sp.size)
 	return b
 }
 
 func (p *BucketPool) GetFilled(len int) *Bytes {
-	sp := p.findPool(len)
+	_, sp := p.findPool(len)
 
 	var b *Bytes
 	if sp == nil {
-		p.overs.Add(1)
 		p.over(len, false)
 		b = makeSizedBytes(len)
 	} else {
-		p.hits.Add(1)
-		b = sp.pool.Get().(*Bytes)
+		b, _ = sp.get()
 		b.B = internal.GrowMinMax(b.B, len, sp.size)
 	}
 	b.B = b.B[:len]
@@ -144,17 +139,28 @@ func (p *BucketPool) Put(b *Bytes) {
 	if b == nil {
 		return
 	}
-	sp := p.findPool(cap(b.B))
-	if sp == nil {
+
+	_, pool := p.findPool(cap(b.B))
+	if pool == nil {
 		p.over(cap(b.B), true)
 		return
 	}
-	b.B = b.B[:0]
-	sp.pool.Put(b)
+	pool.put(b)
+}
+
+type BucketStats struct {
+	Size   int
+	Hits   uint64
+	Misses uint64
 }
 
 type BucketPoolStats struct {
+	Buckets  []BucketStats
+	MinSize  int
+	MaxSize  int
+	Sizes    int
 	Hits     uint64
+	Misses   uint64
 	Overs    uint64
 	GetOvers []int
 	PutOvers []int
@@ -165,24 +171,43 @@ func (p *BucketPool) Stats() BucketPoolStats {
 	}
 	defer p.oversLock.Store(false)
 
-	return BucketPoolStats{
-		Hits:     p.hits.Load(),
+	ps := BucketPoolStats{
+		MinSize:  p.pools[0].size,
+		MaxSize:  p.pools[len(p.pools)-1].size,
+		Sizes:    len(p.pools),
 		Overs:    p.overs.Load(),
 		GetOvers: slices.Clone(p.getOvers),
 		PutOvers: slices.Clone(p.putOvers),
 	}
+	for _, sp := range p.pools {
+		s := BucketStats{
+			Size:   sp.size,
+			Hits:   sp.hits.Load(),
+			Misses: sp.misses.Load(),
+		}
+		if s.Hits <= 0 && s.Misses <= 0 {
+			continue
+		}
+		ps.Hits += s.Hits
+		ps.Misses += s.Misses
+		ps.Buckets = append(ps.Buckets, s)
+	}
+	return ps
 }
 
-func (p *BucketPool) findPool(size int) *sizedPool {
-	for _, sp := range p.pools {
+// -1/nil when not found.
+func (p *BucketPool) findPool(size int) (idx int, _ *sizedPool) {
+	for i, sp := range p.pools {
 		if size <= sp.size {
-			return sp
+			return i, sp
 		}
 	}
-	return nil
+	return -1, nil
 }
 
 func (p *BucketPool) over(over int, isPut bool) {
+	p.overs.Add(1)
+
 	if p.oversLock.Swap(true) { //  already locked, skip to reduce contention
 		return
 	}
@@ -205,15 +230,33 @@ func (p *BucketPool) over(over int, isPut bool) {
 type sizedPool struct {
 	size int
 	pool sync.Pool
+
+	hits   atomic.Uint64
+	misses atomic.Uint64
 }
 
 func newSizedPool(size int) *sizedPool {
-	return &sizedPool{
-		size: size,
-		pool: sync.Pool{
-			New: func() any { return makeSizedBytes(size) },
-		},
+	return &sizedPool{size: size}
+}
+
+func (p *sizedPool) get() (_ *Bytes, hit bool) {
+	b, _ := p.pool.Get().(*Bytes)
+	if b == nil {
+		b = makeSizedBytes(p.size)
+		p.misses.Add(1)
+		return b, false
 	}
+	p.hits.Add(1)
+	return b, true
+}
+
+// b cannot be nil. cap(b) can't be over p.size.
+func (p *sizedPool) put(b *Bytes) {
+	if cap(b.B) > p.size {
+		panic("unexpected cap")
+	}
+	b.B = b.B[:0]
+	p.pool.Put(b)
 }
 
 func makeSizedBytes(c int) *Bytes {

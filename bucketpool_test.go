@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/graxinc/bytepool"
 )
 
@@ -14,22 +15,39 @@ func TestBucket_stats(t *testing.T) {
 	t.Parallel()
 
 	t.Run("check results", func(t *testing.T) {
-		pool := bytepool.NewBucket(2, 9)
-		for j := range 12 {
-			buf := pool.GetFilled(j)
-			if j == 11 { // putting after appending more
-				buf.B = append(buf.B, 1, 2, 3)
+		var lastDiff string
+		for range 100 { // can have a buf dropped sometimes
+			pool := bytepool.NewBucket(2, 9)
+			for j := range 12 {
+				buf := pool.GetFilled(j)
+				if j == 11 { // putting after appending more
+					buf.B = append(buf.B, 1, 2, 3)
+				}
+				pool.Put(buf)
 			}
-			pool.Put(buf)
+			got := pool.Stats()
+			want := bytepool.BucketPoolStats{
+				Buckets: []bytepool.BucketStats{
+					{Size: 2, Hits: 2, Misses: 1},
+					{Size: 4, Hits: 1, Misses: 1},
+					{Size: 8, Hits: 3, Misses: 1},
+					{Size: 9, Misses: 1},
+				},
+				MinSize:  2,
+				MaxSize:  9,
+				Sizes:    4,
+				Hits:     6,
+				Misses:   4,
+				Overs:    4,
+				GetOvers: []int{10, 11},
+				PutOvers: []int{10, 24},
+			}
+			lastDiff = cmp.Diff(want, got)
+			if lastDiff == "" {
+				return
+			}
 		}
-		got := pool.Stats()
-		want := bytepool.BucketPoolStats{
-			Hits:     10,
-			Overs:    2,
-			GetOvers: []int{10, 11},
-			PutOvers: []int{10, 24},
-		}
-		diffFatal(t, want, got)
+		t.Fatal(lastDiff)
 	})
 	t.Run("check for race", func(t *testing.T) {
 		pool := bytepool.NewBucket(2, 9)

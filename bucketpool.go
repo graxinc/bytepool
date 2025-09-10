@@ -115,23 +115,21 @@ func (p *BucketPool) GetGrown(c int) *Bytes {
 		p.over(c, false)
 		return makeSizedBytes(c)
 	}
-	b, _ := sp.get()
-	b.B = internal.GrowMinMax(b.B, c, sp.size)
+	b, _ := sp.get(c)
 	return b
 }
 
-func (p *BucketPool) GetFilled(len int) *Bytes {
-	_, sp := p.findPool(len)
+func (p *BucketPool) GetFilled(length int) *Bytes {
+	_, sp := p.findPool(length)
 
 	var b *Bytes
 	if sp == nil {
-		p.over(len, false)
-		b = makeSizedBytes(len)
+		p.over(length, false)
+		b = makeSizedBytes(length)
 	} else {
-		b, _ = sp.get()
-		b.B = internal.GrowMinMax(b.B, len, sp.size)
+		b, _ = sp.get(length)
 	}
-	b.B = b.B[:len]
+	b.B = b.B[:length]
 	return b
 }
 
@@ -292,7 +290,7 @@ func (g *BucketPooler) GetFilled(length int) *Bytes {
 func (g *BucketPooler) Get() *Bytes {
 	idx := g.defIdx.Load()
 
-	b, hit := g.pool.pools[idx].get()
+	b, hit := g.pool.pools[idx].get(0)
 	if hit {
 		g.bins[idx].hits.Add(1)
 	} else {
@@ -398,14 +396,25 @@ func newSizedPool(size int) *sizedPool {
 	return &sizedPool{size: size}
 }
 
-func (p *sizedPool) get() (_ *Bytes, hit bool) {
+// returned bytes will have cap c <= p.size
+// c cannot be over p.size. zero c means unknown.
+func (p *sizedPool) get(c int) (_ *Bytes, hit bool) {
+	if c > p.size {
+		panic("unexpected c")
+	}
+
 	b, _ := p.pool.Get().(*Bytes)
 	if b == nil {
-		b = makeSizedBytes(p.size)
+		if c <= 0 {
+			b = makeSizedBytes(p.size)
+		} else {
+			b = makeSizedBytes(c)
+		}
 		p.misses.Add(1)
 		return b, false
 	}
 	p.hits.Add(1)
+	b.B = internal.GrowMinMax(b.B, c, p.size)
 	return b, true
 }
 
@@ -414,10 +423,12 @@ func (p *sizedPool) put(b *Bytes) {
 	if cap(b.B) > p.size {
 		panic("unexpected cap")
 	}
+
 	b.B = b.B[:0]
 	p.pool.Put(b)
 }
 
+// returned bytes have cap c and zero len.
 func makeSizedBytes(c int) *Bytes {
 	return &Bytes{
 		B: make([]byte, 0, c),

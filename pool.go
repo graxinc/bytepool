@@ -32,14 +32,14 @@ type Pooler interface {
 
 // Ensures capacity for min total elements.
 // Returned slice has len=0.
-func Grow(s []byte, min int) []byte {
+func Grow[T any](s []T, min int) []T {
 	s = s[:0]
 
 	c := cap(s)
-	if min < c {
+	if min <= c {
 		return s
 	}
 
 	// allocates only once, shown in the tests. Similar to slices.Grow (note it isn't for min total).
-	return append(s[:cap(s)], make([]byte, min-c)...)[:0]
+	return append(s[:cap(s)], make([]T, min-c)...)[:0]
 }

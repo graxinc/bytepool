@@ -5,8 +5,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-
-	"github.com/graxinc/bytepool/internal"
 )
 
 // sizes that increase with the power of two.
@@ -300,6 +298,10 @@ func (g *BucketPooler) Get() *Bytes {
 }
 
 func (g *BucketPooler) Put(b *Bytes) {
+	if b == nil {
+		return
+	}
+
 	defer g.pool.Put(b) // after len use below
 
 	idx, _ := g.pool.findPool(len(b.B))
@@ -396,8 +398,8 @@ func newSizedPool(size int) *sizedPool {
 	return &sizedPool{size: size}
 }
 
-// returned bytes will have cap c <= p.size
-// c cannot be over p.size. zero c means unknown.
+// returned bytes will have cap >= c if c is positive.
+// c cannot be over p.size.
 func (p *sizedPool) get(c int) (_ *Bytes, hit bool) {
 	if c > p.size {
 		panic("unexpected c")
@@ -414,7 +416,7 @@ func (p *sizedPool) get(c int) (_ *Bytes, hit bool) {
 		return b, false
 	}
 	p.hits.Add(1)
-	b.B = internal.GrowMinMax(b.B, c, p.size)
+	b.B = Grow(b.B, c)
 	return b, true
 }
 

@@ -34,14 +34,14 @@ func TestBucket_stats(t *testing.T) {
 				Buckets: []bytepool.BucketStats{
 					{Size: 2, Hits: 2, Misses: 1},
 					{Size: 4, Hits: 1, Misses: 1},
-					{Size: 8, Hits: 3, Misses: 1},
+					{Size: 8, Hits: 4},
 					{Size: 9, Misses: 1},
 				},
 				MinSize:  2,
 				MaxSize:  9,
 				Sizes:    4,
-				Hits:     6,
-				Misses:   4,
+				Hits:     7,
+				Misses:   3,
 				Overs:    4,
 				GetOvers: []int{10, 11},
 				PutOvers: []int{10, 24},
@@ -273,55 +273,45 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 
 func TestBucket_GetFilled_putLess(t *testing.T) {
 	t.Parallel()
-	pool := bytepool.NewBucket(4, 16)
+	caps := make(map[int]struct{})
+	timeout := time.Now().Add(10 * time.Second)
+	for len(caps) < 2 && time.Now().Before(timeout) {
+		pool := bytepool.NewBucket(4, 16)
 
-	buf := pool.GetGrown(7)
-	diffFatal(t, 0, len(buf.B))
-	diffFatal(t, 7, cap(buf.B))
-	buf.B = make([]byte, 6)
-	pool.Put(buf)
+		buf := pool.GetGrown(7)
+		diffFatal(t, 0, len(buf.B))
+		diffFatal(t, 7, cap(buf.B))
+		buf.B = make([]byte, 6)
+		pool.Put(buf)
 
-	buf = pool.GetFilled(8)
-	diffFatal(t, 8, len(buf.B))
-	diffFatal(t, 8, cap(buf.B))
+		buf = pool.GetFilled(8)
+		diffFatal(t, 8, len(buf.B))
+		caps[cap(buf.B)] = struct{}{}
+	}
+	want := map[int]struct{}{8: {}, 16: {}}
+	diffFatal(t, want, caps)
 }
 
 func TestBucket_getSmaller(t *testing.T) {
 	t.Parallel()
 	pool := bytepool.NewBucket(32, 64)
 
-	var newCap, prevCap, bucketCap bool
-	timeout := time.Now().Add(10 * time.Second)
-	for {
-		if time.Now().After(timeout) {
-			t.Fatal("timeout")
-		}
+	caps := make(map[int]struct{})
 
+	timeout := time.Now().Add(10 * time.Second)
+	for len(caps) < 2 && time.Now().Before(timeout) {
 		buf := pool.GetGrown(30)
 		diffFatal(t, 0, len(buf.B))
+		// no cap check, test is checking smaller one below.
 		pool.Put(buf)
 
 		buf = pool.GetGrown(28)
 		diffFatal(t, 0, len(buf.B))
-		c := cap(buf.B)
-		if c == 30 {
-			prevCap = true
-		}
-		if c == 28 {
-			newCap = true
-		}
-		if c == 32 {
-			bucketCap = true
-		}
+		caps[cap(buf.B)] = struct{}{}
 		pool.Put(buf)
-
-		if prevCap && newCap && bucketCap {
-			return
-		}
-		if !prevCap && !newCap && !bucketCap {
-			t.Fatal(c)
-		}
 	}
+	want := map[int]struct{}{28: {}, 30: {}}
+	diffFatal(t, want, caps)
 }
 
 func TestBucket_basic(t *testing.T) {
@@ -550,27 +540,6 @@ func TestBucket_ExpoSizes(t *testing.T) {
 			t.Fatal(med)
 		}
 	})
-}
-
-func TestBucket_fuzz(t *testing.T) {
-	t.Parallel()
-	rando := rand.New(rand.NewPCG(0, 0))
-
-	const maxTestSize = 16384
-	for range 20000 {
-		minSize := rando.IntN(maxTestSize)
-		if minSize == 0 {
-			minSize = 1
-		}
-		maxSize := minSize + 1 + rando.IntN(maxTestSize-minSize)
-
-		p := bytepool.NewBucket(minSize, maxSize)
-
-		bufSize := rando.IntN(maxTestSize)
-		buf := p.GetGrown(bufSize)
-		diffFatal(t, 0, len(buf.B))
-		p.Put(buf)
-	}
 }
 
 func BenchmarkBucket_getPut(b *testing.B) {

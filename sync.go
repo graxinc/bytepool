@@ -2,8 +2,6 @@ package bytepool
 
 import (
 	"sync"
-
-	"github.com/graxinc/bytepool/internal"
 )
 
 type syncPool struct {
@@ -27,13 +25,13 @@ func (p *syncPool) Get() *Bytes {
 
 func (p *syncPool) GetGrown(c int) *Bytes {
 	b := p.Get()
-	b.B = internal.GrowMin(b.B, c)
+	b.B = Grow(b.B, c)
 	return b
 }
 
 func (p *syncPool) GetFilled(len int) *Bytes {
 	b := p.Get()
-	b.B = internal.GrowMin(b.B, len)[:len]
+	b.B = Grow(b.B, len)[:len]
 	return b
 }
 

@@ -18,6 +18,7 @@ type SizedPooler interface {
 	GetFilled(length int) *Bytes
 
 	// Can be nil. Do not use Bytes after Put.
+	// Ideally whatever length/capacity was created from usage should be left in place.
 	Put(*Bytes)
 }
 
@@ -27,4 +28,18 @@ type Pooler interface {
 	Get() *Bytes
 
 	SizedPooler
+}
+
+// Ensures capacity for min total elements.
+// Returned slice has len=0.
+func Grow(s []byte, min int) []byte {
+	s = s[:0]
+
+	c := cap(s)
+	if min < c {
+		return s
+	}
+
+	// allocates only once, shown in the tests. Similar to slices.Grow (note it isn't for min total).
+	return append(s[:cap(s)], make([]byte, min-c)...)[:0]
 }

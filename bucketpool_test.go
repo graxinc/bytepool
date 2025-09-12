@@ -123,7 +123,7 @@ func TestBucket_getChoice(t *testing.T) {
 			sizes := bytepool.Pow2Sizes(2, 8)
 			var lastDiff string
 			for range 100 { // can have a buf dropped sometimes
-				pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: c.chooseInc})
+				pooler := bytepool.NewBucketFull(sizes, bytepool.BucketPoolOptions{}).Pooler(bytepool.BucketPoolerOptions{ChooseInc: c.chooseInc})
 
 				for _, f := range c.fills {
 					b := pooler.Get()
@@ -149,7 +149,7 @@ func TestBucket_getChoice_shared(t *testing.T) {
 
 	var lastDiff string
 	for range 100 { // can have a buf dropped sometimes
-		pool := bytepool.NewBucketFull(sizes)
+		pool := bytepool.NewBucketFull(sizes, bytepool.BucketPoolOptions{})
 		pooler1 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1})
 		pooler2 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1})
 
@@ -214,7 +214,7 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 	run := func(t *testing.T, center float64, wantDefMin, wantDefMax int) {
 		t.Parallel()
 
-		pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: 200})
+		pooler := bytepool.NewBucketFull(sizes, bytepool.BucketPoolOptions{}).Pooler(bytepool.BucketPoolerOptions{ChooseInc: 200})
 
 		runGo := func(id byte, rando *rand.Rand) {
 			n := normInt(rando, maxSize, center)
@@ -545,7 +545,7 @@ func TestBucket_ExpoSizes(t *testing.T) {
 func BenchmarkBucket_getPut(b *testing.B) {
 	const maxSize = 16384
 	sizes := bytepool.ExpoSizes(2, maxSize, 30)
-	pool := bytepool.NewBucketFull(sizes)
+	pool := bytepool.NewBucketFull(sizes, bytepool.BucketPoolOptions{})
 	b.Log("sizes", sizes)
 	b.SetParallelism(16)
 	b.RunParallel(func(pb *testing.PB) {
@@ -562,7 +562,7 @@ func BenchmarkBucket_getPut(b *testing.B) {
 func BenchmarkBucket_get(b *testing.B) {
 	const maxSize = 16384
 	sizes := bytepool.ExpoSizes(2, maxSize, 30)
-	pool := bytepool.NewBucketFull(sizes)
+	pool := bytepool.NewBucketFull(sizes, bytepool.BucketPoolOptions{})
 	b.Log("sizes", len(sizes))
 	b.SetParallelism(16)
 	b.RunParallel(func(pb *testing.PB) {
@@ -572,6 +572,81 @@ func BenchmarkBucket_get(b *testing.B) {
 			randomSize := rando.IntN(maxSize)
 			data := pool.GetGrown(randomSize)
 			_ = data
+		}
+	})
+}
+
+func TestBucket_lookahead(t *testing.T) {
+	t.Parallel()
+
+	pool := bytepool.NewBucketFull([]int{8, 16, 32}, bytepool.BucketPoolOptions{
+		LookaheadBuckets:    2,
+		LookaheadMultiplier: 3.0,
+	})
+
+	var hit bool
+	for range 4000 {
+		buf16 := pool.GetGrown(16)
+		pool.Put(buf16)
+
+		buf7 := pool.GetGrown(7)
+
+		if cap(buf7.B) == 16 {
+			hit = true
+			break
+		}
+	}
+	if !hit {
+		t.Fatal("expected hit")
+	}
+
+	stats := pool.Stats()
+	hit = false
+	for _, bucket := range stats.Buckets {
+		if bucket.Size == 8 && bucket.LookaheadHits > 0 {
+			hit = true
+			break
+		}
+	}
+	if !hit {
+		t.Fatalf("expected hit\n%#v", stats)
+	}
+}
+
+func TestBucket_lookaheadLimits(t *testing.T) {
+	t.Parallel()
+
+	t.Run("buckets", func(t *testing.T) {
+		pool := bytepool.NewBucketFull([]int{8, 16, 32, 64, 128}, bytepool.BucketPoolOptions{
+			LookaheadBuckets: 2,
+		})
+
+		for range 4000 {
+			buf64 := pool.GetGrown(64)
+			pool.Put(buf64)
+
+			buf7 := pool.GetGrown(7)
+
+			if cap(buf7.B) != 7 {
+				t.Fatal(cap(buf7.B))
+			}
+		}
+	})
+
+	t.Run("multiplier", func(t *testing.T) {
+		pool := bytepool.NewBucketFull([]int{8, 16, 32}, bytepool.BucketPoolOptions{
+			LookaheadMultiplier: 2,
+		})
+
+		for range 4000 {
+			buf16 := pool.GetGrown(16)
+			pool.Put(buf16)
+
+			buf7 := pool.GetGrown(7)
+
+			if cap(buf7.B) != 7 {
+				t.Fatal(cap(buf7.B))
+			}
 		}
 	})
 }

@@ -70,23 +70,31 @@ func ExpoSizes(minSize, maxSize, numBuckets int) []int {
 	return sizes
 }
 
+type BucketPoolOptions struct {
+	LookaheadBuckets    int     // check up to this many following buckets if exact is empty.
+	LookaheadMultiplier float32 // check up to this size multiplier if exact is empty.
+}
+
 type BucketPool struct {
 	pools     []*sizedPool
 	overs     atomic.Uint64
 	oversLock atomic.Bool
 	getOvers  []int
 	putOvers  []int
+
+	lookaheadBuckets    int
+	lookaheadMultiplier float32
 }
 
 // Deprecated.
 func NewBucket(minSize, maxSize int) *BucketPool {
-	return NewBucketFull(Pow2Sizes(minSize, maxSize))
+	return NewBucketFull(Pow2Sizes(minSize, maxSize), BucketPoolOptions{})
 }
 
 // Suitable for variable sized Bytes if max bounds can be chosen.
 // Puts over max size will be allocated directly.
 // sizes must not be empty and each must be >= 1. Repeats will be removed.
-func NewBucketFull(sizes []int) *BucketPool {
+func NewBucketFull(sizes []int, o BucketPoolOptions) *BucketPool {
 	if len(sizes) == 0 {
 		panic("empty sizes")
 	}
@@ -104,29 +112,59 @@ func NewBucketFull(sizes []int) *BucketPool {
 	for _, s := range sizes {
 		pools = append(pools, newSizedPool(s))
 	}
-	return &BucketPool{pools: pools}
+
+	if o.LookaheadBuckets < 0 {
+		o.LookaheadBuckets = 0
+	}
+	if o.LookaheadMultiplier < 0 {
+		o.LookaheadMultiplier = 0
+	}
+
+	return &BucketPool{
+		pools:               pools,
+		lookaheadBuckets:    o.LookaheadBuckets,
+		lookaheadMultiplier: o.LookaheadMultiplier,
+	}
+}
+
+// get tries to get a buffer from pools, starting with the exact pool
+// and optionally trying subsequent pools if the exact pool is empty.
+func (p *BucketPool) get(size int) *Bytes {
+	idx, sp := p.findPool(size)
+	if sp == nil {
+		p.over(size, false)
+		return makeSizedBytes(size)
+	}
+
+	if b := sp.get(size, false); b != nil {
+		return b
+	}
+
+	maxSize := float32(math.MaxFloat32)
+	if p.lookaheadMultiplier > 0 {
+		maxSize = float32(size) * p.lookaheadMultiplier
+	}
+	maxBucket := min(len(p.pools), idx+p.lookaheadBuckets+1)
+
+	for i := idx + 1; i < maxBucket; i++ {
+		if float32(p.pools[i].size) > maxSize {
+			break
+		}
+		if b := p.pools[i].get(size, true); b != nil {
+			sp.lookaheadHit()
+			return b
+		}
+	}
+
+	return sp.allocate(size)
 }
 
 func (p *BucketPool) GetGrown(c int) *Bytes {
-	_, sp := p.findPool(c)
-	if sp == nil {
-		p.over(c, false)
-		return makeSizedBytes(c)
-	}
-	b, _ := sp.get(c)
-	return b
+	return p.get(c)
 }
 
 func (p *BucketPool) GetFilled(length int) *Bytes {
-	_, sp := p.findPool(length)
-
-	var b *Bytes
-	if sp == nil {
-		p.over(length, false)
-		b = makeSizedBytes(length)
-	} else {
-		b, _ = sp.get(length)
-	}
+	b := p.get(length)
 	b.B = b.B[:length]
 	return b
 }
@@ -181,21 +219,23 @@ func (p *BucketPool) Put(b *Bytes) {
 }
 
 type BucketStats struct {
-	Size   int
-	Hits   uint64
-	Misses uint64
+	Size          int
+	Hits          uint64
+	LookaheadHits uint64 // Hits served by looking ahead
+	Misses        uint64
 }
 
 type BucketPoolStats struct {
-	Buckets  []BucketStats // only those with positive counters.
-	MinSize  int
-	MaxSize  int
-	Sizes    int
-	Hits     uint64
-	Misses   uint64
-	Overs    uint64
-	GetOvers []int
-	PutOvers []int
+	Buckets       []BucketStats // only those with positive counters.
+	MinSize       int
+	MaxSize       int
+	Sizes         int
+	Hits          uint64
+	Misses        uint64
+	LookaheadHits uint64
+	Overs         uint64
+	GetOvers      []int
+	PutOvers      []int
 }
 
 func (p *BucketPool) Stats() BucketPoolStats {
@@ -213,14 +253,16 @@ func (p *BucketPool) Stats() BucketPoolStats {
 	}
 	for _, sp := range p.pools {
 		s := BucketStats{
-			Size:   sp.size,
-			Hits:   sp.hits.Load(),
-			Misses: sp.misses.Load(),
+			Size:          sp.size,
+			Hits:          sp.hits.Load(),
+			LookaheadHits: sp.lookaheadHits.Load(),
+			Misses:        sp.misses.Load(),
 		}
-		if s.Hits <= 0 && s.Misses <= 0 {
+		if s.Hits <= 0 && s.LookaheadHits <= 0 && s.Misses <= 0 {
 			continue
 		}
 		ps.Hits += s.Hits
+		ps.LookaheadHits += s.LookaheadHits
 		ps.Misses += s.Misses
 		ps.Buckets = append(ps.Buckets, s)
 	}
@@ -288,13 +330,14 @@ func (g *BucketPooler) GetFilled(length int) *Bytes {
 func (g *BucketPooler) Get() *Bytes {
 	idx := g.defIdx.Load()
 
-	b, hit := g.pool.pools[idx].get(0)
-	if hit {
+	p := g.pool.pools[idx]
+
+	if b := p.get(0, false); b != nil {
 		g.bins[idx].hits.Add(1)
-	} else {
-		g.bins[idx].misses.Add(1)
+		return b
 	}
-	return b
+	g.bins[idx].misses.Add(1)
+	return p.allocate(0)
 }
 
 func (g *BucketPooler) Put(b *Bytes) {
@@ -390,34 +433,52 @@ type sizedPool struct {
 	size int
 	pool sync.Pool
 
-	hits   atomic.Uint64
-	misses atomic.Uint64
+	hits          atomic.Uint64
+	lookaheadHits atomic.Uint64
+	misses        atomic.Uint64
 }
 
 func newSizedPool(size int) *sizedPool {
 	return &sizedPool{size: size}
 }
 
-// returned bytes will have cap >= c if c is positive.
-// c cannot be over p.size.
-func (p *sizedPool) get(c int) (_ *Bytes, hit bool) {
+// nil if pool is empty. c cannot be over p.size.
+func (p *sizedPool) get(c int, lookahead bool) *Bytes {
 	if c > p.size {
 		panic("unexpected c")
 	}
 
 	b, _ := p.pool.Get().(*Bytes)
 	if b == nil {
-		if c <= 0 {
-			b = makeSizedBytes(p.size)
-		} else {
-			b = makeSizedBytes(c)
-		}
-		p.misses.Add(1)
-		return b, false
+		return nil
 	}
-	p.hits.Add(1)
+
+	if !lookahead {
+		p.hits.Add(1)
+	}
 	b.B = Grow(b.B, c)
-	return b, true
+	return b
+}
+
+func (p *sizedPool) lookaheadHit() {
+	p.hits.Add(1)
+	p.lookaheadHits.Add(1)
+}
+
+// c cannot be over p.size.
+func (p *sizedPool) allocate(c int) *Bytes {
+	if c > p.size {
+		panic("unexpected c")
+	}
+
+	var b *Bytes
+	if c <= 0 {
+		b = makeSizedBytes(p.size)
+	} else {
+		b = makeSizedBytes(c)
+	}
+	p.misses.Add(1)
+	return b
 }
 
 // b cannot be nil. cap(b) can't be over p.size.

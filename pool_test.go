@@ -187,11 +187,13 @@ func TestGrow(t *testing.T) {
 		min     int
 		wantCap int
 	}{
+		{nil, -1, 0},
 		{nil, 0, 0},
 		{nil, 1, 8},
 		{nil, 8, 8},
 		{nil, 9, 16},
 
+		{[]byte{1}, -1, 1},
 		{[]byte{1}, 0, 1},
 		{[]byte{1}, 1, 1},
 		{[]byte{1}, 2, 8},

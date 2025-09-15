@@ -31,6 +31,7 @@ type Pooler interface {
 }
 
 // Ensures capacity for min total elements.
+// Min can be <= 0.
 // Returned slice has len=0.
 func Grow[T any](s []T, min int) []T {
 	s = s[:0]

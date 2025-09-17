@@ -132,9 +132,10 @@ func (p *BucketPool) GetFilled(length int) *Bytes {
 }
 
 type BucketPoolerOptions struct {
-	ChooseInc   int     // defaults to 1k puts.
-	Decay       float64 // defaults to 0.5 (half previous put count).
-	MaxPoolPuts int     // defaults to 100 times ChooseInc.
+	ChooseInc      int     // defaults to 1k puts.
+	Decay          float64 // defaults to 0.5 (half previous put count).
+	MaxPoolPuts    int     // defaults to 100 times ChooseInc.
+	DefaultPlusOne bool    // Choose default bucket to be the next higher than chosen.
 }
 
 func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
@@ -162,6 +163,7 @@ func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
 		chooseInc:   int64(o.ChooseInc),
 		decay:       o.Decay,
 		maxPoolPuts: int64(o.MaxPoolPuts),
+		defPlusOne:  o.DefaultPlusOne,
 	}
 	pooler.puts.Store(-9)
 	return pooler
@@ -271,6 +273,7 @@ type BucketPooler struct {
 	chooseInc   int64
 	maxPoolPuts int64
 	decay       float64
+	defPlusOne  bool
 
 	bins   []*histoBin // slice immutable, same length as sizes in pool.
 	defIdx atomic.Int64
@@ -369,6 +372,9 @@ func (g *BucketPooler) chooseDefPool() {
 			maxPuts = v
 			bestPool = i
 		}
+	}
+	if g.defPlusOne && bestPool < len(g.bins)-1 {
+		bestPool++ // next above since bufs in this one won't all be grown.
 	}
 	g.defIdx.Store(int64(bestPool))
 }

@@ -95,12 +95,11 @@ func TestBucket_getChoice(t *testing.T) {
 			want: bytepool.BucketPoolerStats{
 				Bins: []bytepool.BinStats{
 					{Size: 2, Misses: 1},
-					{Size: 4, Hits: 1, Misses: 1},
-					{Size: 8, Hits: 2},
+					{Size: 8, Hits: 4},
 				},
 				DefaultSize: 8,
-				Hits:        3,
-				Misses:      2,
+				Hits:        4,
+				Misses:      1,
 			},
 		},
 		{
@@ -108,11 +107,11 @@ func TestBucket_getChoice(t *testing.T) {
 			chooseInc: 3,
 			want: bytepool.BucketPoolerStats{
 				Bins: []bytepool.BinStats{
-					{Size: 2, Puts: 2, Hits: 2, Misses: 1},
-					{Size: 4, Puts: 1, Hits: 3, Misses: 2},
-					{Size: 8, Puts: 1, Hits: 9},
+					{Size: 2, Puts: 2, Misses: 1},
+					{Size: 4, Puts: 1, Hits: 1, Misses: 1},
+					{Size: 8, Puts: 1, Hits: 13, Misses: 1},
 				},
-				DefaultSize: 4,
+				DefaultSize: 8,
 				Hits:        14,
 				Misses:      3,
 			},
@@ -123,7 +122,7 @@ func TestBucket_getChoice(t *testing.T) {
 			sizes := bytepool.Pow2Sizes(2, 8)
 			var lastDiff string
 			for range 100 { // can have a buf dropped sometimes
-				pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: c.chooseInc})
+				pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: c.chooseInc, DefaultPlusOne: true})
 
 				for _, f := range c.fills {
 					b := pooler.Get()
@@ -150,8 +149,8 @@ func TestBucket_getChoice_shared(t *testing.T) {
 	var lastDiff string
 	for range 100 { // can have a buf dropped sometimes
 		pool := bytepool.NewBucketFull(sizes)
-		pooler1 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1})
-		pooler2 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1})
+		pooler1 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1, DefaultPlusOne: true})
+		pooler2 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1, DefaultPlusOne: true})
 
 		do := func(p *bytepool.BucketPooler, fills ...int) {
 			for _, f := range fills {
@@ -168,11 +167,10 @@ func TestBucket_getChoice_shared(t *testing.T) {
 			{
 				Bins: []bytepool.BinStats{
 					{Size: 4, Misses: 1},
-					{Size: 8, Hits: 1},
+					{Size: 16, Misses: 1},
 				},
-				DefaultSize: 8,
-				Hits:        1,
-				Misses:      1,
+				DefaultSize: 16,
+				Misses:      2,
 			},
 			{
 				Bins: []bytepool.BinStats{
@@ -209,12 +207,13 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 	}
 
 	const maxSize = 1000
-	sizes := bytepool.ExpoSizes(8, maxSize, 20)
+	sizes := bytepool.ExpoSizes(100, maxSize, 20)
+	t.Log("sizes", sizes)
 
 	run := func(t *testing.T, center float64, wantDefMin, wantDefMax int) {
 		t.Parallel()
 
-		pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: 200})
+		pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1000, DefaultPlusOne: true})
 
 		runGo := func(id byte, rando *rand.Rand) {
 			n := normInt(rando, maxSize, center)
@@ -266,9 +265,9 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 			t.Fatal(s.DefaultSize)
 		}
 	}
-	t.Run("center=0.3", func(t *testing.T) { run(t, 0.3, 280, 470) })
-	t.Run("center=0.5", func(t *testing.T) { run(t, 0.5, 450, 650) })
-	t.Run("center=0.7", func(t *testing.T) { run(t, 0.7, 650, 780) })
+	t.Run("center=0.3", func(t *testing.T) { run(t, 0.3, 200, 500) })
+	t.Run("center=0.5", func(t *testing.T) { run(t, 0.5, 450, 776) })
+	t.Run("center=0.7", func(t *testing.T) { run(t, 0.7, 650, 886) })
 }
 
 func TestBucket_GetFilled_putLess(t *testing.T) {

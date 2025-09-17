@@ -135,6 +135,7 @@ type BucketPoolerOptions struct {
 	ChooseInc   int     // defaults to 1k puts.
 	Decay       float64 // defaults to 0.5 (half previous put count).
 	MaxPoolPuts int     // defaults to 100 times ChooseInc.
+	MaxBinSize  int     // defaults to same as max bucket.
 }
 
 func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
@@ -153,7 +154,10 @@ func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
 	// a too big smallest bin for a large exponential size set of pools.
 
 	var bins []*histoBin
-	for range p.pools {
+	for _, p := range p.pools {
+		if o.MaxBinSize > 0 && p.size > o.MaxBinSize {
+			break
+		}
 		bins = append(bins, &histoBin{})
 	}
 	pooler := &BucketPooler{
@@ -272,7 +276,7 @@ type BucketPooler struct {
 	maxPoolPuts int64
 	decay       float64
 
-	bins   []*histoBin // slice immutable, same length as sizes in pool.
+	bins   []*histoBin // slice immutable, indexed with pools but might stop early.
 	defIdx atomic.Int64
 	puts   atomic.Int64 // starts at -9
 }
@@ -305,7 +309,7 @@ func (g *BucketPooler) Put(b *Bytes) {
 	defer g.pool.Put(b) // after len use below
 
 	idx, _ := g.pool.findPool(len(b.B))
-	if idx < 0 {
+	if idx < 0 || idx >= len(g.bins) {
 		return
 	}
 

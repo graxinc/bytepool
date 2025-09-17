@@ -87,6 +87,7 @@ func TestBucket_getChoice(t *testing.T) {
 	cases := []struct {
 		fills     []int
 		chooseInc int
+		binMax    int
 		want      bytepool.BucketPoolerStats
 	}{
 		{
@@ -117,13 +118,27 @@ func TestBucket_getChoice(t *testing.T) {
 				Misses:      3,
 			},
 		},
+		{
+			fills:     []int{1, 2, 3, 3, 4, 5, 6, 7, 8, 3, 7, 6, 5, 4, 3, 2, 1},
+			chooseInc: 3,
+			binMax:    7,
+			want: bytepool.BucketPoolerStats{
+				Bins: []bytepool.BinStats{
+					{Size: 2, Puts: 1, Hits: 2, Misses: 2},
+					{Size: 4, Puts: 0, Hits: 5, Misses: 8},
+				},
+				DefaultSize: 2,
+				Hits:        7,
+				Misses:      10,
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run("", func(t *testing.T) {
 			sizes := bytepool.Pow2Sizes(2, 8)
 			var lastDiff string
 			for range 100 { // can have a buf dropped sometimes
-				pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: c.chooseInc})
+				pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: c.chooseInc, MaxBinSize: c.binMax})
 
 				for _, f := range c.fills {
 					b := pooler.Get()

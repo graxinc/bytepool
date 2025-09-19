@@ -168,16 +168,21 @@ func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
 }
 
 func (p *BucketPool) Put(b *Bytes) {
+	p.put(b)
+}
+
+func (p *BucketPool) put(b *Bytes) (idx int) {
 	if b == nil {
-		return
+		return -1
 	}
 
-	_, pool := p.findPool(cap(b.B))
+	idx, pool := p.findPool(cap(b.B))
 	if pool == nil {
 		p.over(cap(b.B), true)
-		return
+		return -1
 	}
 	pool.put(b)
+	return idx
 }
 
 type BucketStats struct {
@@ -298,13 +303,7 @@ func (g *BucketPooler) Get() *Bytes {
 }
 
 func (g *BucketPooler) Put(b *Bytes) {
-	if b == nil {
-		return
-	}
-
-	defer g.pool.Put(b) // after len use below
-
-	idx, _ := g.pool.findPool(len(b.B))
+	idx := g.pool.put(b)
 	if idx < 0 {
 		return
 	}

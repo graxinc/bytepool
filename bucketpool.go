@@ -113,7 +113,7 @@ func (p *BucketPool) GetGrown(c int) *Bytes {
 		p.over(c, false)
 		return makeSizedBytes(c)
 	}
-	b, _ := sp.get(c)
+	b := sp.get(c)
 	return b
 }
 
@@ -125,7 +125,7 @@ func (p *BucketPool) GetFilled(length int) *Bytes {
 		p.over(length, false)
 		b = makeSizedBytes(length)
 	} else {
-		b, _ = sp.get(length)
+		b = sp.get(length)
 	}
 	b.B = b.B[:length]
 	return b
@@ -135,6 +135,7 @@ type BucketPoolerOptions struct {
 	ChooseInc   int     // defaults to 1k puts.
 	Decay       float64 // defaults to 0.5 (half previous put count).
 	MaxPoolPuts int     // defaults to 100 times ChooseInc.
+	Lookahead   int     // defaults to 4 bins.
 }
 
 func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
@@ -146,6 +147,9 @@ func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
 	}
 	if o.MaxPoolPuts <= 0 {
 		o.MaxPoolPuts = o.ChooseInc * 100
+	}
+	if o.Lookahead <= 0 {
+		o.Lookahead = 4
 	}
 
 	// since pools and bins are not separate and the ranges in sizes can be non-linear, it might
@@ -162,6 +166,7 @@ func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
 		chooseInc:   int64(o.ChooseInc),
 		decay:       o.Decay,
 		maxPoolPuts: int64(o.MaxPoolPuts),
+		lookahead:   o.Lookahead,
 	}
 	pooler.puts.Store(-9)
 	return pooler
@@ -271,6 +276,7 @@ type BucketPooler struct {
 	chooseInc   int64
 	maxPoolPuts int64
 	decay       float64
+	lookahead   int
 
 	bins   []*histoBin // slice immutable, same length as sizes in pool.
 	defIdx atomic.Int64
@@ -286,14 +292,23 @@ func (g *BucketPooler) GetFilled(length int) *Bytes {
 }
 
 func (g *BucketPooler) Get() *Bytes {
-	idx := g.defIdx.Load()
+	defIdx := g.defIdx.Load()
 
-	b, hit := g.pool.pools[idx].get(0)
-	if hit {
-		g.bins[idx].hits.Add(1)
-	} else {
-		g.bins[idx].misses.Add(1)
+	for i := range g.lookahead + 1 {
+		idx := defIdx + int64(i)
+		if idx >= int64(len(g.bins)) {
+			break
+		}
+
+		b := g.pool.pools[idx].getNoAlloc(0)
+		if b != nil {
+			g.bins[idx].hits.Add(1)
+			return b
+		}
 	}
+
+	b := g.pool.pools[defIdx].allocate(0)
+	g.bins[defIdx].misses.Add(1)
 	return b
 }
 
@@ -400,24 +415,44 @@ func newSizedPool(size int) *sizedPool {
 
 // returned bytes will have cap >= c if c is positive.
 // c cannot be over p.size.
-func (p *sizedPool) get(c int) (_ *Bytes, hit bool) {
+func (p *sizedPool) get(c int) *Bytes {
+	b := p.getNoAlloc(c)
+	if b != nil {
+		return b
+	}
+	return p.allocate(c)
+}
+
+// returns nil if miss.
+// c cannot be over p.size.
+func (p *sizedPool) getNoAlloc(c int) *Bytes {
 	if c > p.size {
 		panic("unexpected c")
 	}
 
 	b, _ := p.pool.Get().(*Bytes)
 	if b == nil {
-		if c <= 0 {
-			b = makeSizedBytes(p.size)
-		} else {
-			b = makeSizedBytes(c)
-		}
-		p.misses.Add(1)
-		return b, false
+		return nil
 	}
 	p.hits.Add(1)
 	b.B = Grow(b.B, c)
-	return b, true
+	return b
+}
+
+// returned bytes will have cap >= c if c is positive.
+// c cannot be over p.size.
+func (p *sizedPool) allocate(c int) *Bytes {
+	if c > p.size {
+		panic("unexpected c")
+	}
+	var b *Bytes
+	if c <= 0 {
+		b = makeSizedBytes(p.size)
+	} else {
+		b = makeSizedBytes(c)
+	}
+	p.misses.Add(1)
+	return b
 }
 
 // b cannot be nil. cap(b) can't be over p.size.

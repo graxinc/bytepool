@@ -20,7 +20,7 @@ func TestBucket_stats(t *testing.T) {
 
 	t.Run("check results", func(t *testing.T) {
 		var lastDiff string
-		for range 100 { // can have a buf dropped sometimes
+		for range 1000 { // can have a buf dropped sometimes
 			pool := bytepool.NewBucket(2, 9)
 			for j := range 12 {
 				buf := pool.GetFilled(j)
@@ -95,12 +95,14 @@ func TestBucket_getChoice(t *testing.T) {
 			want: bytepool.BucketPoolerStats{
 				Bins: []bytepool.BinStats{
 					{Size: 2, Misses: 1},
-					{Size: 4, Hits: 1, Misses: 1},
-					{Size: 8, Hits: 2},
+					{Size: 4, MissesLookahead: 2},
+					{Size: 8, Hits: 4, HitsLookahead: 2},
 				},
-				DefaultSize: 8,
-				Hits:        3,
-				Misses:      2,
+				DefaultSize:     8,
+				Hits:            4,
+				Misses:          1,
+				HitsLookahead:   2,
+				MissesLookahead: 2,
 			},
 		},
 		{
@@ -109,20 +111,22 @@ func TestBucket_getChoice(t *testing.T) {
 			want: bytepool.BucketPoolerStats{
 				Bins: []bytepool.BinStats{
 					{Size: 2, Puts: 2, Hits: 2, Misses: 1},
-					{Size: 4, Puts: 1, Hits: 3, Misses: 2},
-					{Size: 8, Puts: 1, Hits: 9},
+					{Size: 4, Puts: 1, Hits: 0, Misses: 0, MissesLookahead: 5},
+					{Size: 8, Puts: 1, Hits: 14, Misses: 0, HitsLookahead: 5},
 				},
-				DefaultSize: 4,
-				Hits:        14,
-				Misses:      3,
+				DefaultSize:     4,
+				Hits:            16,
+				Misses:          1,
+				HitsLookahead:   5,
+				MissesLookahead: 5,
 			},
 		},
 	}
 	for _, c := range cases {
 		t.Run("", func(t *testing.T) {
-			sizes := bytepool.Pow2Sizes(2, 8)
+			sizes := bytepool.Pow2Sizes(2, 32)
 			var lastDiff string
-			for range 100 { // can have a buf dropped sometimes
+			for range 1000 { // can have a buf dropped sometimes
 				pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: c.chooseInc})
 
 				for _, f := range c.fills {
@@ -148,7 +152,7 @@ func TestBucket_getChoice_shared(t *testing.T) {
 	t.Log("sizes", sizes)
 
 	var lastDiff string
-	for range 100 { // can have a buf dropped sometimes
+	for range 1000 { // can have a buf dropped sometimes
 		pool := bytepool.NewBucketFull(sizes)
 		pooler1 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1})
 		pooler2 := pool.Pooler(bytepool.BucketPoolerOptions{ChooseInc: 1})
@@ -176,12 +180,14 @@ func TestBucket_getChoice_shared(t *testing.T) {
 			},
 			{
 				Bins: []bytepool.BinStats{
-					{Size: 4, Misses: 1},
+					{Size: 4, MissesLookahead: 1},
+					{Size: 8, Hits: 1, HitsLookahead: 1},
 					{Size: 16, Hits: 1},
 				},
-				DefaultSize: 16,
-				Hits:        1,
-				Misses:      1,
+				DefaultSize:     16,
+				Hits:            2,
+				HitsLookahead:   1,
+				MissesLookahead: 1,
 			},
 		}
 
@@ -201,15 +207,15 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 		f := rando.NormFloat64()
 
 		// normfloat * stddev + desiredMean
-		vf := f*(float64(n)/7) + float64(n)*center
+		vf := f*(float64(n)/12) + float64(n)*center
 		v := int(math.RoundToEven(vf))
 		v = min(n, v)
 		v = max(0, v)
 		return v
 	}
 
-	const maxSize = 1000
-	sizes := bytepool.ExpoSizes(8, maxSize, 20)
+	var poolMax = 4000
+	sizes := bytepool.ExpoSizes(8, poolMax, 20)
 
 	run := func(t *testing.T, center float64, wantDefMin, wantDefMax int) {
 		t.Parallel()
@@ -217,7 +223,7 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 		pooler := bytepool.NewBucketFull(sizes).Pooler(bytepool.BucketPoolerOptions{ChooseInc: 200})
 
 		runGo := func(id byte, rando *rand.Rand) {
-			n := normInt(rando, maxSize, center)
+			n := normInt(rando, poolMax/2, center)
 
 			b := pooler.Get()
 
@@ -225,7 +231,7 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 				t.Error(v)
 				return
 			}
-			if v := cap(b.B); v > maxSize {
+			if v := cap(b.B); v > poolMax {
 				t.Error(v)
 				return
 			}
@@ -244,6 +250,16 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 			pooler.Put(b)
 		}
 
+		var defs []int
+		var mu sync.Mutex
+		addDefSize := func() {
+			mu.Lock()
+			defer mu.Unlock()
+
+			s := pooler.Stats()
+			defs = append(defs, s.DefaultSize)
+		}
+
 		var wg sync.WaitGroup
 		for i := range byte(5) {
 			wg.Add(1)
@@ -252,8 +268,11 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 
 				rando := rand.New(rand.NewPCG(uint64(i), 0))
 
-				for range 10_000 {
+				for j := range 10_000 {
 					runGo(i, rando)
+					if j%1000 == 0 {
+						addDefSize()
+					}
 				}
 			}()
 		}
@@ -262,13 +281,19 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 		s := pooler.Stats()
 		t.Logf("stats:\n%+v", s)
 
-		if s.DefaultSize < wantDefMin || s.DefaultSize > wantDefMax {
-			t.Fatal(s.DefaultSize)
+		var avg int
+		for _, d := range defs {
+			avg += d
+		}
+		avg = avg / len(defs)
+
+		if avg < wantDefMin || avg > wantDefMax {
+			t.Fatal(avg)
 		}
 	}
-	t.Run("center=0.3", func(t *testing.T) { run(t, 0.3, 280, 470) })
-	t.Run("center=0.5", func(t *testing.T) { run(t, 0.5, 450, 650) })
-	t.Run("center=0.7", func(t *testing.T) { run(t, 0.7, 650, 780) })
+	t.Run("center=0.3", func(t *testing.T) { run(t, 0.3, 700, 1000) })
+	t.Run("center=0.5", func(t *testing.T) { run(t, 0.5, 1000, 1500) })
+	t.Run("center=0.7", func(t *testing.T) { run(t, 0.7, 1400, 2000) })
 }
 
 func TestBucket_GetFilled_putLess(t *testing.T) {

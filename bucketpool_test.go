@@ -95,11 +95,14 @@ func TestBucket_getChoice(t *testing.T) {
 			want: bytepool.BucketPoolerStats{
 				Bins: []bytepool.BinStats{
 					{Size: 2, Misses: 1},
-					{Size: 8, Hits: 4},
+					{Size: 4, MissesLookahead: 2},
+					{Size: 8, Hits: 4, HitsLookahead: 2},
 				},
-				DefaultSize: 8,
-				Hits:        4,
-				Misses:      1,
+				DefaultSize:     8,
+				Hits:            4,
+				Misses:          1,
+				HitsLookahead:   2,
+				MissesLookahead: 2,
 			},
 		},
 		{
@@ -107,13 +110,15 @@ func TestBucket_getChoice(t *testing.T) {
 			chooseInc: 3,
 			want: bytepool.BucketPoolerStats{
 				Bins: []bytepool.BinStats{
-					{Size: 2, Puts: 2, Hits: 1, Misses: 2},
-					{Size: 4, Puts: 1, Hits: 2, Misses: 1},
-					{Size: 8, Puts: 1, Hits: 9, Misses: 2},
+					{Size: 2, Puts: 2, Hits: 2, Misses: 1},
+					{Size: 4, Puts: 1, Hits: 0, Misses: 0, MissesLookahead: 5},
+					{Size: 8, Puts: 1, Hits: 14, Misses: 0, HitsLookahead: 5},
 				},
-				DefaultSize: 4,
-				Hits:        12,
-				Misses:      5,
+				DefaultSize:     4,
+				Hits:            16,
+				Misses:          1,
+				HitsLookahead:   5,
+				MissesLookahead: 5,
 			},
 		},
 	}
@@ -175,11 +180,14 @@ func TestBucket_getChoice_shared(t *testing.T) {
 			},
 			{
 				Bins: []bytepool.BinStats{
-					{Size: 8, Hits: 1},
+					{Size: 4, MissesLookahead: 1},
+					{Size: 8, Hits: 1, HitsLookahead: 1},
 					{Size: 16, Hits: 1},
 				},
-				DefaultSize: 16,
-				Hits:        2,
+				DefaultSize:     16,
+				Hits:            2,
+				HitsLookahead:   1,
+				MissesLookahead: 1,
 			},
 		}
 

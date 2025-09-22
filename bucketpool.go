@@ -135,7 +135,7 @@ type BucketPoolerOptions struct {
 	ChooseInc   int     // defaults to 1k puts.
 	Decay       float64 // defaults to 0.5 (half previous put count).
 	MaxPoolPuts int     // defaults to 100 times ChooseInc.
-	Lookahead   int     // defaults to 4 bins.
+	BinChecks   int     // defaults to chosen bin plus 3 ahead. Use 1 to turn off lookahead.
 }
 
 func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
@@ -148,9 +148,10 @@ func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
 	if o.MaxPoolPuts <= 0 {
 		o.MaxPoolPuts = o.ChooseInc * 100
 	}
-	if o.Lookahead <= 0 {
-		o.Lookahead = 4
+	if o.BinChecks <= 0 {
+		o.BinChecks = 4
 	}
+	o.BinChecks = max(1, o.BinChecks)
 
 	// since pools and bins are not separate and the ranges in sizes can be non-linear, it might
 	// push the default pool up or down. However separating bins out bins to linear can lead to
@@ -166,7 +167,7 @@ func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
 		chooseInc:   int64(o.ChooseInc),
 		decay:       o.Decay,
 		maxPoolPuts: int64(o.MaxPoolPuts),
-		lookahead:   o.Lookahead,
+		binChecks:   o.BinChecks,
 	}
 	pooler.puts.Store(-9)
 	return pooler
@@ -265,9 +266,11 @@ func (p *BucketPool) over(over int, isPut bool) {
 }
 
 type histoBin struct {
-	puts   atomic.Int64
-	hits   atomic.Uint64
-	misses atomic.Uint64
+	puts            atomic.Int64
+	hits            atomic.Uint64
+	hitsLookahead   atomic.Uint64
+	misses          atomic.Uint64
+	missesLookahead atomic.Uint64
 }
 
 type BucketPooler struct {
@@ -276,7 +279,7 @@ type BucketPooler struct {
 	chooseInc   int64
 	maxPoolPuts int64
 	decay       float64
-	lookahead   int
+	binChecks   int
 
 	bins   []*histoBin // slice immutable, same length as sizes in pool.
 	defIdx atomic.Int64
@@ -294,17 +297,23 @@ func (g *BucketPooler) GetFilled(length int) *Bytes {
 func (g *BucketPooler) Get() *Bytes {
 	defIdx := g.defIdx.Load()
 
-	for i := range g.lookahead + 1 {
+	for i := range g.binChecks {
 		idx := defIdx + int64(i)
 		if idx >= int64(len(g.bins)) {
 			break
 		}
 
 		b := g.pool.pools[idx].getNoAlloc(0)
-		if b != nil {
-			g.bins[idx].hits.Add(1)
-			return b
+		if b == nil {
+			continue
 		}
+		bin := g.bins[idx]
+		if i > 0 {
+			bin.hitsLookahead.Add(1)
+			g.bins[defIdx].missesLookahead.Add(1)
+		}
+		bin.hits.Add(1)
+		return b
 	}
 
 	b := g.pool.pools[defIdx].allocate(0)
@@ -340,17 +349,21 @@ func (g *BucketPooler) Put(b *Bytes) {
 }
 
 type BinStats struct {
-	Size   int
-	Puts   int64
-	Hits   uint64
-	Misses uint64
+	Size            int
+	Puts            int64
+	Hits            uint64
+	Misses          uint64
+	HitsLookahead   uint64
+	MissesLookahead uint64
 }
 
 type BucketPoolerStats struct {
-	Bins        []BinStats // only those with positive counters
-	DefaultSize int
-	Hits        uint64
-	Misses      uint64
+	Bins            []BinStats // only those with positive counters
+	DefaultSize     int
+	Hits            uint64
+	HitsLookahead   uint64
+	Misses          uint64
+	MissesLookahead uint64
 }
 
 func (g *BucketPooler) Stats() BucketPoolerStats {
@@ -359,16 +372,20 @@ func (g *BucketPooler) Stats() BucketPoolerStats {
 	}
 	for i, bin := range g.bins {
 		s := BinStats{
-			Size:   g.pool.pools[i].size,
-			Puts:   bin.puts.Load(),
-			Hits:   bin.hits.Load(),
-			Misses: bin.misses.Load(),
+			Size:            g.pool.pools[i].size,
+			Puts:            bin.puts.Load(),
+			Hits:            bin.hits.Load(),
+			Misses:          bin.misses.Load(),
+			HitsLookahead:   bin.hitsLookahead.Load(),
+			MissesLookahead: bin.missesLookahead.Load(),
 		}
-		if s.Puts <= 0 && s.Hits <= 0 && s.Misses <= 0 {
+		if s.Puts <= 0 && s.Hits <= 0 && s.Misses <= 0 && s.HitsLookahead <= 0 && s.MissesLookahead <= 0 {
 			continue
 		}
 		ps.Hits += s.Hits
 		ps.Misses += s.Misses
+		ps.HitsLookahead += s.HitsLookahead
+		ps.MissesLookahead += s.MissesLookahead
 		ps.Bins = append(ps.Bins, s)
 	}
 	return ps

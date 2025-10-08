@@ -71,22 +71,23 @@ func ExpoSizes(minSize, maxSize, numBuckets int) []int {
 }
 
 type BucketPool struct {
-	pools     []*sizedPool
-	overs     atomic.Uint64
-	oversLock atomic.Bool
-	getOvers  []int
-	putOvers  []int
+	allocToSize bool
+	pools       []*sizedPool
+	overs       atomic.Uint64
+	oversLock   atomic.Bool
+	getOvers    []int
+	putOvers    []int
 }
 
 // Deprecated.
 func NewBucket(minSize, maxSize int) *BucketPool {
-	return NewBucketFull(Pow2Sizes(minSize, maxSize))
+	return NewBucketFull(Pow2Sizes(minSize, maxSize), false)
 }
 
 // Suitable for variable sized Bytes if max bounds can be chosen.
 // Puts over max size will be allocated directly.
 // sizes must not be empty and each must be >= 1. Repeats will be removed.
-func NewBucketFull(sizes []int) *BucketPool {
+func NewBucketFull(sizes []int, allocToSize bool) *BucketPool {
 	if len(sizes) == 0 {
 		panic("empty sizes")
 	}
@@ -104,7 +105,7 @@ func NewBucketFull(sizes []int) *BucketPool {
 	for _, s := range sizes {
 		pools = append(pools, newSizedPool(s))
 	}
-	return &BucketPool{pools: pools}
+	return &BucketPool{allocToSize: allocToSize, pools: pools}
 }
 
 func (p *BucketPool) GetGrown(c int) *Bytes {
@@ -112,6 +113,9 @@ func (p *BucketPool) GetGrown(c int) *Bytes {
 	if sp == nil {
 		p.over(c, false)
 		return makeSizedBytes(c)
+	}
+	if p.allocToSize {
+		c = sp.size
 	}
 	b := sp.get(c)
 	return b
@@ -125,7 +129,11 @@ func (p *BucketPool) GetFilled(length int) *Bytes {
 		p.over(length, false)
 		b = makeSizedBytes(length)
 	} else {
-		b = sp.get(length)
+		c := length
+		if p.allocToSize {
+			c = sp.size
+		}
+		b = sp.get(c)
 	}
 	b.B = b.B[:length]
 	return b

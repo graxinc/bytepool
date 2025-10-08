@@ -211,10 +211,74 @@ func TestGrow(t *testing.T) {
 				t.Fatal(got)
 			}
 			if cap(got) != c.wantCap {
-				t.Fatal(cap(got))
+				t.Fatal(cap(got), c.wantCap)
 			}
 		})
 	}
+
+	t.Run("preserves", func(t *testing.T) {
+		v := []byte{1, 2}
+		got := bytepool.Grow(v, 3)
+		if len(got) != 0 {
+			t.Fatal(got)
+		}
+		if cap(got) < 3 {
+			t.Fatal(cap(got))
+		}
+		want := []byte{1, 2}
+		diffFatal(t, want, got[:2])
+	})
+}
+
+func TestSized(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		v       []byte
+		size    int
+		wantCap int
+	}{
+		{nil, -1, 0},
+		{nil, 0, 0},
+		{nil, 1, 1},
+		{nil, 8, 8},
+		{nil, 9, 9},
+
+		{[]byte{1}, -1, 1},
+		{[]byte{1}, 0, 1},
+		{[]byte{1}, 1, 1},
+		{[]byte{1}, 2, 2},
+		{[]byte{1}, 8, 8},
+		{[]byte{1}, 9, 9},
+
+		{[]byte{1, 2}, 2, 2},
+		{[]byte{1, 2}, 3, 3},
+		{[]byte{1, 2}, 9, 9},
+	}
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("v=%v,size=%v", c.v, c.size), func(t *testing.T) {
+			got := bytepool.Sized(c.v, c.size)
+			if len(got) != 0 {
+				t.Fatal(got)
+			}
+			if cap(got) != c.wantCap {
+				t.Fatal(cap(got), c.wantCap)
+			}
+		})
+	}
+
+	t.Run("discards", func(t *testing.T) {
+		v := []byte{1, 2}
+		got := bytepool.Sized(v, 3)
+		if len(got) != 0 {
+			t.Fatal(got)
+		}
+		if cap(got) < 3 {
+			t.Fatal(cap(got))
+		}
+		want := []byte{0, 0}
+		diffFatal(t, want, got[:2])
+	})
 }
 
 func BenchmarkSizedPooler(b *testing.B) {

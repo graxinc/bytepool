@@ -85,6 +85,7 @@ func NewBucket(minSize, maxSize int) *BucketPool {
 
 // Suitable for variable sized Bytes if max bounds can be chosen.
 // Puts over max size will be allocated directly.
+// Bytes returned by GetGrown and GetFilled will have cap of first size >= c/length.
 // sizes must not be empty and each must be >= 1. Repeats will be removed.
 func NewBucketFull(sizes []int) *BucketPool {
 	if len(sizes) == 0 {
@@ -113,8 +114,7 @@ func (p *BucketPool) GetGrown(c int) *Bytes {
 		p.over(c, false)
 		return makeSizedBytes(c)
 	}
-	b := sp.get(c)
-	return b
+	return sp.get()
 }
 
 func (p *BucketPool) GetFilled(length int) *Bytes {
@@ -125,7 +125,7 @@ func (p *BucketPool) GetFilled(length int) *Bytes {
 		p.over(length, false)
 		b = makeSizedBytes(length)
 	} else {
-		b = sp.get(length)
+		b = sp.get()
 	}
 	b.B = b.B[:length]
 	return b
@@ -303,7 +303,7 @@ func (g *BucketPooler) Get() *Bytes {
 			break
 		}
 
-		b := g.pool.pools[idx].getNoAlloc(0)
+		b := g.pool.pools[idx].getNoAlloc()
 		if b == nil {
 			continue
 		}
@@ -316,7 +316,7 @@ func (g *BucketPooler) Get() *Bytes {
 		return b
 	}
 
-	b := g.pool.pools[defIdx].allocate(0)
+	b := g.pool.pools[defIdx].allocate()
 	g.bins[defIdx].misses.Add(1)
 	return b
 }
@@ -430,46 +430,29 @@ func newSizedPool(size int) *sizedPool {
 	return &sizedPool{size: size}
 }
 
-// returned bytes will have cap >= c if c is positive.
-// c cannot be over p.size.
-func (p *sizedPool) get(c int) *Bytes {
-	b := p.getNoAlloc(c)
+// returned bytes will have cap == sp.size.
+func (p *sizedPool) get() *Bytes {
+	b := p.getNoAlloc()
 	if b != nil {
 		return b
 	}
-	return p.allocate(c)
+	return p.allocate()
 }
 
 // returns nil if miss.
-// c cannot be over p.size.
-func (p *sizedPool) getNoAlloc(c int) *Bytes {
-	if c > p.size {
-		panic("unexpected c")
-	}
-
+func (p *sizedPool) getNoAlloc() *Bytes {
 	b, _ := p.pool.Get().(*Bytes)
 	if b == nil {
 		return nil
 	}
 	p.hits.Add(1)
-	b.B = Grow(b.B, c)
+	b.B = Sized(b.B, p.size)
 	return b
 }
 
-// returned bytes will have cap >= c if c is positive.
-// c cannot be over p.size.
-func (p *sizedPool) allocate(c int) *Bytes {
-	if c > p.size {
-		panic("unexpected c")
-	}
-	var b *Bytes
-	if c <= 0 {
-		b = makeSizedBytes(p.size)
-	} else {
-		b = makeSizedBytes(c)
-	}
+func (p *sizedPool) allocate() *Bytes {
 	p.misses.Add(1)
-	return b
+	return makeSizedBytes(p.size)
 }
 
 // b cannot be nil. cap(b) can't be over p.size.

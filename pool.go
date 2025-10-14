@@ -44,3 +44,14 @@ func Grow[T any](s []T, min int) []T {
 	// allocates only once, shown in the tests. Similar to slices.Grow (note it isn't for min total).
 	return append(s[:cap(s)], make([]T, min-c)...)[:0]
 }
+
+// Returns s if cap(s) >= size, otherwise makes a new slice with cap=size.
+// New slice does not preserve contents of s.
+// Size can be <= 0.
+// Returned slice has len=0.
+func Sized[T any](s []T, size int) []T {
+	if size <= cap(s) {
+		return s[:0]
+	}
+	return make([]T, 0, size)
+}

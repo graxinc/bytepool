@@ -38,7 +38,7 @@ func TestBucket_GetFilled(t *testing.T) {
 		if cap(buf.B) != wantCap {
 			t.Fatal(c, wantCap, cap(buf.B))
 		}
-		pool.Put(buf)
+		buf.Release()
 	}
 
 	buf := pool.GetFilled(20)
@@ -48,7 +48,7 @@ func TestBucket_GetFilled(t *testing.T) {
 	if cap(buf.B) != 20 {
 		t.Fatal(cap(buf.B))
 	}
-	pool.Put(buf)
+	buf.Release()
 }
 
 func TestBucket_GetGrown(t *testing.T) {
@@ -74,7 +74,7 @@ func TestBucket_GetGrown(t *testing.T) {
 		if cap(buf.B) != wantCap {
 			t.Fatal(c, wantCap, cap(buf.B))
 		}
-		pool.Put(buf)
+		buf.Release()
 	}
 
 	buf := pool.GetGrown(20)
@@ -84,7 +84,7 @@ func TestBucket_GetGrown(t *testing.T) {
 	if cap(buf.B) != 20 {
 		t.Fatal(cap(buf.B))
 	}
-	pool.Put(buf)
+	buf.Release()
 }
 
 func TestBucket_stats(t *testing.T) {
@@ -99,7 +99,7 @@ func TestBucket_stats(t *testing.T) {
 				if j == 11 { // putting after appending more
 					buf.B = append(buf.B, 1, 2, 3)
 				}
-				pool.Put(buf)
+				buf.Release()
 			}
 			got := pool.Stats()
 			want := bytepool.BucketPoolStats{
@@ -134,7 +134,7 @@ func TestBucket_stats(t *testing.T) {
 				if j == 11 { // putting after appending more
 					buf.B = append(buf.B, 1, 2, 3)
 				}
-				pool.Put(buf)
+				buf.Release()
 			}
 			pool.Stats() // check for race
 		}
@@ -204,7 +204,7 @@ func TestBucket_getChoice(t *testing.T) {
 				for _, f := range c.fills {
 					b := pooler.Get()
 					fillBytes(b, f)
-					pooler.Put(b)
+					b.Release()
 				}
 
 				lastDiff = cmp.Diff(c.want, pooler.Stats())
@@ -233,7 +233,7 @@ func TestBucket_getChoice_shared(t *testing.T) {
 			for _, f := range fills {
 				b := p.Get()
 				fillBytes(b, f)
-				p.Put(b)
+				b.Release()
 			}
 		}
 		do(pooler1, 5, 6)
@@ -319,7 +319,7 @@ func TestBucket_getChoice_concurrent(t *testing.T) {
 				return false
 			}
 
-			pooler.Put(b)
+			b.Release()
 			return true
 		}
 
@@ -382,7 +382,7 @@ func TestBucket_GetFilled_putLess(t *testing.T) {
 		diffFatal(t, 0, len(buf.B))
 		diffFatal(t, 8, cap(buf.B))
 		buf.B = make([]byte, 6)
-		pool.Put(buf)
+		buf.Release()
 
 		buf = pool.GetFilled(8)
 		diffFatal(t, 8, len(buf.B))
@@ -405,53 +405,53 @@ func TestBucket_basic(t *testing.T) {
 	buf = pool.GetGrown(128)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 1024, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 	buf = pool.GetFilled(123)
 	diffFatal(t, 123, len(buf.B))
 	if c := cap(buf.B); c != 1024 {
 		t.Fatal(c)
 	}
-	pool.Put(buf)
+	buf.Release()
 
 	// get boundary size
 	buf = pool.GetGrown(1024)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 1024, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 	buf = pool.GetFilled(1024)
 	diffFatal(t, 1024, len(buf.B))
 	diffFatal(t, 1024, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 
 	// get from the middle
 	buf = pool.GetGrown(5000)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 8192, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 	buf = pool.GetFilled(5000)
 	diffFatal(t, 5000, len(buf.B))
 	diffFatal(t, 8192, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 
 	// check last pool
 	buf = pool.GetGrown(16383)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 16384, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 	buf = pool.GetFilled(16383)
 	diffFatal(t, 16383, len(buf.B))
 	diffFatal(t, 16384, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 
 	// get over last pool
 	buf = pool.GetGrown(16385)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 16385, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 	buf = pool.GetFilled(16385)
 	diffFatal(t, 16385, len(buf.B))
 	diffFatal(t, 16385, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 }
 
 func TestBucket_twoSizeNotMultiplier(t *testing.T) {
@@ -462,12 +462,12 @@ func TestBucket_twoSizeNotMultiplier(t *testing.T) {
 	buf := pool.GetGrown(64)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 1024, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 
 	buf = pool.GetGrown(2001)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 2001, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 }
 
 func TestBucket_weirdMaxSize(t *testing.T) {
@@ -478,12 +478,12 @@ func TestBucket_weirdMaxSize(t *testing.T) {
 	buf := pool.GetGrown(15000)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 15000, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 
 	buf = pool.GetGrown(16383)
 	diffFatal(t, 0, len(buf.B))
 	diffFatal(t, 16383, cap(buf.B))
-	pool.Put(buf)
+	buf.Release()
 }
 
 func TestBucket_LinearSizes(t *testing.T) {
@@ -632,7 +632,7 @@ func BenchmarkBucket_getPut(b *testing.B) {
 		for pb.Next() {
 			randomSize := rando.IntN(maxSize)
 			data := pool.GetGrown(randomSize)
-			pool.Put(data)
+			data.Release()
 		}
 	})
 }

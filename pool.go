@@ -5,26 +5,35 @@ package bytepool
 // to avoid an extra allocation.
 
 type Bytes struct {
-	B []byte
+	B    []byte
+	pool poolPutter
+}
+
+// Release returns the Bytes to the pool it came from.
+// Do not use Bytes after calling Release.
+func (b *Bytes) Release() {
+	if b != nil && b.pool != nil {
+		b.pool.put(b)
+	}
+}
+
+type poolPutter interface {
+	put(*Bytes)
 }
 
 type SizedPooler interface {
-	// Bytes with zero length and minimum capacity c. If giving back
-	// to pool, the original pointer should be Put.
+	// Bytes with zero length and minimum capacity c.
+	// Call Release on the returned Bytes to return it to the pool.
 	GetGrown(c int) *Bytes
 
-	// Bytes with length. If giving back to pool, the
-	// original pointer should be Put.
+	// Bytes with length.
+	// Call Release on the returned Bytes to return it to the pool.
 	GetFilled(length int) *Bytes
-
-	// Can be nil. Do not use Bytes after Put.
-	// Ideally whatever length/capacity was created from usage should be left in place.
-	Put(*Bytes)
 }
 
 type Pooler interface {
-	// Bytes with zero length. If giving back to pool, the
-	// original pointer should be Put.
+	// Bytes with zero length.
+	// Call Release on the returned Bytes to return it to the pool.
 	Get() *Bytes
 
 	SizedPooler

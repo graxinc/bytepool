@@ -112,9 +112,9 @@ func (p *BucketPool) GetGrown(c int) *Bytes {
 	_, sp := p.findPool(c)
 	if sp == nil {
 		p.over(c, false)
-		return makeSizedBytes(c)
+		return makeSizedBytes(c, p)
 	}
-	return sp.get()
+	return sp.get(p)
 }
 
 func (p *BucketPool) GetFilled(length int) *Bytes {
@@ -123,9 +123,9 @@ func (p *BucketPool) GetFilled(length int) *Bytes {
 	var b *Bytes
 	if sp == nil {
 		p.over(length, false)
-		b = makeSizedBytes(length)
+		b = makeSizedBytes(length, p)
 	} else {
-		b = sp.get()
+		b = sp.get(p)
 	}
 	b.B = b.B[:length]
 	return b
@@ -173,7 +173,7 @@ func (p *BucketPool) Pooler(o BucketPoolerOptions) *BucketPooler {
 	return pooler
 }
 
-func (p *BucketPool) Put(b *Bytes) {
+func (p *BucketPool) put(b *Bytes) {
 	if b == nil {
 		return
 	}
@@ -303,7 +303,7 @@ func (g *BucketPooler) Get() *Bytes {
 			break
 		}
 
-		b := g.pool.pools[idx].getNoAlloc()
+		b := g.pool.pools[idx].getNoAlloc(g)
 		if b == nil {
 			continue
 		}
@@ -316,17 +316,17 @@ func (g *BucketPooler) Get() *Bytes {
 		return b
 	}
 
-	b := g.pool.pools[defIdx].allocate()
+	b := g.pool.pools[defIdx].allocate(g)
 	g.bins[defIdx].misses.Add(1)
 	return b
 }
 
-func (g *BucketPooler) Put(b *Bytes) {
+func (g *BucketPooler) put(b *Bytes) {
 	if b == nil {
 		return
 	}
 
-	defer g.pool.Put(b) // after len use below
+	defer g.pool.put(b) // after len use below
 
 	idx, _ := g.pool.findPool(len(b.B))
 	if idx < 0 {
@@ -431,28 +431,31 @@ func newSizedPool(size int) *sizedPool {
 }
 
 // returned bytes will have cap == sp.size.
-func (p *sizedPool) get() *Bytes {
-	b := p.getNoAlloc()
+func (p *sizedPool) get(pp poolPutter) *Bytes {
+	b := p.getNoAlloc(pp)
 	if b != nil {
 		return b
 	}
-	return p.allocate()
+	return p.allocate(pp)
 }
 
 // returns nil if miss.
-func (p *sizedPool) getNoAlloc() *Bytes {
+func (p *sizedPool) getNoAlloc(pp poolPutter) *Bytes {
 	b, _ := p.pool.Get().(*Bytes)
 	if b == nil {
 		return nil
 	}
 	p.hits.Add(1)
 	b.B = Sized(b.B, p.size)
+	// BucketPool and BucketPooler can trade Bytes so
+	// need to set pool to ensure Release flows correctly.
+	b.pool = pp
 	return b
 }
 
-func (p *sizedPool) allocate() *Bytes {
+func (p *sizedPool) allocate(pp poolPutter) *Bytes {
 	p.misses.Add(1)
-	return makeSizedBytes(p.size)
+	return makeSizedBytes(p.size, pp)
 }
 
 // b cannot be nil. cap(b) can't be over p.size.
@@ -466,8 +469,9 @@ func (p *sizedPool) put(b *Bytes) {
 }
 
 // returned bytes have cap c and zero len.
-func makeSizedBytes(c int) *Bytes {
+func makeSizedBytes(c int, p poolPutter) *Bytes {
 	return &Bytes{
-		B: make([]byte, 0, c),
+		B:    make([]byte, 0, c),
+		pool: p,
 	}
 }

@@ -34,7 +34,7 @@ func TestSizedPooler_concurrentMutation(t *testing.T) {
 					t.Error("concurrent modification")
 				}
 
-				pool.Put(b)
+				b.Release()
 			}
 		}
 
@@ -96,7 +96,7 @@ func TestSizedPooler_lenAndCap(t *testing.T) {
 				b.B = b.B[:c/2]
 			}
 
-			pool.Put(b)
+			b.Release()
 		}
 	}
 	t.Run("sync", func(t *testing.T) {
@@ -114,25 +114,11 @@ func TestSizedPooler_lenAndCap(t *testing.T) {
 	})
 }
 
-func TestSizedPooler_nilPut(t *testing.T) {
+func TestBytes_nilRelease(t *testing.T) {
 	t.Parallel()
 
-	run := func(_ *testing.T, pool bytepool.SizedPooler) {
-		pool.Put(nil)
-	}
-	t.Run("sync", func(t *testing.T) {
-		run(t, bytepool.NewSync())
-	})
-	t.Run("dynamic", func(t *testing.T) {
-		run(t, bytepool.NewDynamic())
-	})
-	t.Run("bucket", func(t *testing.T) {
-		run(t, bytepool.NewBucket(1, 20))
-	})
-	t.Run("bucket_pooler", func(t *testing.T) {
-		pool := bytepool.NewBucket(1, 20)
-		run(t, pool.Pooler(bytepool.BucketPoolerOptions{}))
-	})
+	var b *bytepool.Bytes
+	b.Release()
 }
 
 func TestGrowAllocs(t *testing.T) {
@@ -282,7 +268,7 @@ func TestSized(t *testing.T) {
 }
 
 func BenchmarkSizedPooler(b *testing.B) {
-	run := func(b *testing.B, pool bytepool.SizedPooler, doPut bool) {
+	run := func(b *testing.B, pool bytepool.SizedPooler, doRelease bool) {
 		b.RunParallel(func(p *testing.PB) {
 			rando := rand.New(rand.NewPCG(0, 0))
 			for p.Next() {
@@ -290,26 +276,26 @@ func BenchmarkSizedPooler(b *testing.B) {
 				b := pool.GetGrown(c)
 				b.B = b.B[:c]
 				b.B[1] = 5
-				if doPut {
-					pool.Put(b)
+				if doRelease {
+					b.Release()
 				}
 			}
 		})
 	}
-	for _, doPut := range []bool{false, true} {
-		b.Run(fmt.Sprintf("put=%v", doPut), func(b *testing.B) {
+	for _, doRelease := range []bool{false, true} {
+		b.Run(fmt.Sprintf("release=%v", doRelease), func(b *testing.B) {
 			b.Run("dynamic", func(b *testing.B) {
-				run(b, bytepool.NewDynamic(), doPut)
+				run(b, bytepool.NewDynamic(), doRelease)
 			})
 			b.Run("sync", func(b *testing.B) {
-				run(b, bytepool.NewSync(), doPut)
+				run(b, bytepool.NewSync(), doRelease)
 			})
 			b.Run("bucket", func(b *testing.B) {
-				run(b, bytepool.NewBucket(1, 5), doPut)
+				run(b, bytepool.NewBucket(1, 5), doRelease)
 			})
 			b.Run("bucket_pooler", func(b *testing.B) {
 				pool := bytepool.NewBucket(1, 5)
-				run(b, pool.Pooler(bytepool.BucketPoolerOptions{}), doPut)
+				run(b, pool.Pooler(bytepool.BucketPoolerOptions{}), doRelease)
 			})
 		})
 	}

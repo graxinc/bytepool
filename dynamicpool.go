@@ -30,8 +30,8 @@ type dynamicPool struct {
 	callSizes callSizes // buffered for use in calibrate
 }
 
-// Continually tunes the Get allocation size and max Put size. Suitable for variable
-// sized Bytes, but at a cost.
+// Continually tunes the Get allocation size and max Released size.
+// Suitable for variable sized Bytes, but at a cost.
 func NewDynamic() Pooler {
 	return new(dynamicPool)
 }
@@ -39,9 +39,7 @@ func NewDynamic() Pooler {
 func (p *dynamicPool) Get() *Bytes {
 	v := p.pool.Get()
 	if v == nil {
-		return &Bytes{
-			B: make([]byte, 0, atomic.LoadUint64(&p.defaultSize)),
-		}
+		return makeSizedBytes(int(atomic.LoadUint64(&p.defaultSize)), p)
 	}
 	return v.(*Bytes)
 }
@@ -58,7 +56,7 @@ func (p *dynamicPool) GetFilled(len int) *Bytes {
 	return b
 }
 
-func (p *dynamicPool) Put(b *Bytes) {
+func (p *dynamicPool) put(b *Bytes) {
 	if b == nil {
 		return
 	}

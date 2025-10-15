@@ -68,7 +68,7 @@ func testGetPut(t *testing.T, p bytepool.Pooler, n int) {
 	b := p.Get()
 	diffFatal(t, 0, len(b.B))
 	b.B = allocNBytes(b.B, n)
-	p.Put(b)
+	b.Release()
 }
 
 func allocNBytes(dst []byte, n int) []byte {

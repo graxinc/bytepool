@@ -17,10 +17,10 @@ If you can choose some size bounds, prefer:
 pool := bytepool.NewBucket(10, 100_000)
 
 b := pool.Get()
-defer b.Put(b)
+defer b.Release()
 
 // use buffer
-b.B = append(b.B, 1,2,3) 
+b.B = append(b.B, 1, 2, 3)
 writeData(b.B)
 ```
 

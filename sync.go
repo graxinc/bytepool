@@ -16,11 +16,14 @@ func NewSync() Pooler {
 }
 
 func (p *syncPool) Get() *Bytes {
-	b := p.p.Get()
-	if b == nil {
-		return new(Bytes)
+	v := p.p.Get()
+	var b *Bytes
+	if v == nil {
+		b = &Bytes{pool: p}
+	} else {
+		b = v.(*Bytes)
 	}
-	return b.(*Bytes)
+	return b
 }
 
 func (p *syncPool) GetGrown(c int) *Bytes {
@@ -35,7 +38,7 @@ func (p *syncPool) GetFilled(len int) *Bytes {
 	return b
 }
 
-func (p *syncPool) Put(b *Bytes) {
+func (p *syncPool) put(b *Bytes) {
 	if b == nil {
 		return
 	}
